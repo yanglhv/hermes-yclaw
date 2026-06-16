@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useStore } from "@nanostores/react";
-import { $hermesHome, $launcherConfig, loadLauncherConfig, saveLauncherConfig } from "../store";
+import { $hermesHome, $launcherConfig, loadLauncherConfig, saveLauncherConfig, type LauncherConfig } from "../store";
 
 interface FormState {
   preferred_channel: string;
@@ -36,19 +36,6 @@ function formatRepoOverride(owner: string | null, name: string | null, ref_: str
   return repo;
 }
 
-function formToYaml(form: FormState): string {
-  const repo = parseRepoOverride(form.repo_override);
-  const lines: string[] = [];
-  lines.push(`preferred_channel: ${form.preferred_channel}`);
-  lines.push(`auto_update: ${form.auto_update}`);
-  lines.push(`skip_network_probe: ${form.skip_network_probe}`);
-  lines.push("repo:");
-  lines.push(`  owner: ${repo.owner ?? ""}`);
-  lines.push(`  name: ${repo.name ?? ""}`);
-  lines.push(`  ref: ${repo.ref_ ?? ""}`);
-  return lines.join("\n");
-}
-
 export default function Settings() {
   const hermesHome = useStore($hermesHome);
   const launcherConfig = useStore($launcherConfig);
@@ -63,9 +50,9 @@ export default function Settings() {
   useEffect(() => {
     if (launcherConfig) {
       setForm({
-        preferred_channel: launcherConfig.update.check_on_launch ? "stable" : "stable",
-        auto_update: launcherConfig.update.auto_pre_download,
-        skip_network_probe: launcherConfig.ui.start_minimized,
+        preferred_channel: launcherConfig.preferred_channel || "stable",
+        auto_update: launcherConfig.auto_update,
+        skip_network_probe: launcherConfig.skip_network_probe,
         repo_override: formatRepoOverride(
           launcherConfig.repo.owner,
           launcherConfig.repo.name,
@@ -83,17 +70,34 @@ export default function Settings() {
   async function handleSave() {
     setSaveStatus("saving");
     try {
-      const yaml = formToYaml(form);
-      await saveLauncherConfig(yaml);
+      const repo = parseRepoOverride(form.repo_override);
+      const config: LauncherConfig = {
+        preferred_channel: form.preferred_channel,
+        auto_update: form.auto_update,
+        skip_network_probe: form.skip_network_probe,
+        repo,
+      };
+      await saveLauncherConfig(config);
       setSaveStatus("saved");
     } catch {
       setSaveStatus("error");
     }
   }
 
-  function handleReset() {
+  async function handleReset() {
+    const defaults: LauncherConfig = {
+      preferred_channel: "stable",
+      auto_update: false,
+      skip_network_probe: false,
+      repo: { owner: null, name: null, ref_: null },
+    };
     setForm(DEFAULT_FORM);
     setSaveStatus("idle");
+    try {
+      await saveLauncherConfig(defaults);
+    } catch {
+      setSaveStatus("error");
+    }
   }
 
   return (

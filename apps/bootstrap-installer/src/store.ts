@@ -79,9 +79,10 @@ export interface InstalledApp {
 }
 
 export interface LauncherConfig {
+  preferred_channel: string
+  auto_update: boolean
+  skip_network_probe: boolean
   repo: { owner: string | null; name: string | null; ref_: string | null }
-  update: { check_on_launch: boolean; auto_pre_download: boolean; check_interval_seconds: number }
-  ui: { start_minimized: boolean; show_pending_update_banner: boolean }
 }
 
 export interface AppDescriptor {
@@ -427,8 +428,8 @@ export async function loadLauncherConfig(): Promise<void> {
   $launcherConfig.set(config)
 }
 
-export async function saveLauncherConfig(yaml: string): Promise<void> {
-  await invoke('set_launcher_config', { yaml })
+export async function saveLauncherConfig(config: LauncherConfig): Promise<void> {
+  await invoke('save_launcher_config', { config })
   await loadLauncherConfig()
 }
 
