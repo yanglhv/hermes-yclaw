@@ -50,14 +50,14 @@ mod tests {
         s.pending_updates.insert("hermes".into(), PendingUpdate {
             latest_commit: "abc".into(),
             latest_ref_name: "main".into(),
-            status: PendingStatus("ready".into()),
+            status: PendingStatus::Ready,
             downloaded_script: Some(dir.path().join("missing.ps1").to_string_lossy().into()),
             downloaded_at: Some("2026-06-16T00:00:00Z".into()),
             last_error: None,
             last_error_at: None,
         });
         validate_pending_cache(&mut s);
-        assert_eq!(s.pending_updates["hermes"].status, PendingStatus("failed".into()));
+        assert_eq!(s.pending_updates["hermes"].status, PendingStatus::Failed);
     }
 
     #[test]
@@ -69,14 +69,14 @@ mod tests {
         s.pending_updates.insert("hermes".into(), PendingUpdate {
             latest_commit: "abc".into(),
             latest_ref_name: "main".into(),
-            status: PendingStatus("ready".into()),
+            status: PendingStatus::Ready,
             downloaded_script: Some(script.to_string_lossy().into()),
             downloaded_at: Some("2026-06-16T00:00:00Z".into()),
             last_error: None,
             last_error_at: None,
         });
         validate_pending_cache(&mut s);
-        assert_eq!(s.pending_updates["hermes"].status, PendingStatus("ready".into()));
+        assert_eq!(s.pending_updates["hermes"].status, PendingStatus::Ready);
     }
 }
 
@@ -122,12 +122,12 @@ pub fn save_launcher_state(state: &LauncherState) -> Result<()> {
 
 pub fn validate_pending_cache(state: &mut LauncherState) {
     for p in state.pending_updates.values_mut() {
-        if p.status != PendingStatus("ready".into()) {
+        if p.status != PendingStatus::Ready {
             continue;
         }
         if let Some(path) = &p.downloaded_script {
             if !std::path::Path::new(path).exists() {
-                p.status = PendingStatus("failed".into());
+                p.status = PendingStatus::Failed;
                 p.last_error = Some("cached script missing".into());
                 p.last_error_at = Some(now_iso());
             }

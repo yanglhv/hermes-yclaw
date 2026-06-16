@@ -131,8 +131,9 @@ pub struct PendingUpdate {
     pub last_error_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PendingStatus(pub String);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PendingStatus { Avail, Downloading, Ready, Failed }
 
 #[cfg(test)]
 mod tests {

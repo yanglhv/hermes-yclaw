@@ -187,7 +187,7 @@ async fn run_inner(app: &crate::app::AppDescriptor) -> Result<InstallOutcome, St
                         crate::app::PendingUpdate {
                             latest_commit: "pending".into(),
                             latest_ref_name: app.default_repo_ref.r#ref.clone(),
-                            status: crate::app::PendingStatus("avail".into()),
+                            status: crate::app::PendingStatus::Avail,
                             downloaded_script: None,
                             downloaded_at: None,
                             last_error: None,
