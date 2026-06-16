@@ -195,3 +195,25 @@ pub fn open_log_dir(app: tauri::AppHandle) -> Result<(), String> {
         .open_path(path.to_string_lossy(), None::<&str>)
         .map_err(|e| e.to_string())
 }
+
+pub fn launcher_state_path() -> std::path::PathBuf {
+    hermes_home().join("yclaw/launcher/state.json")
+}
+
+pub fn launcher_config_path() -> std::path::PathBuf {
+    hermes_home().join("yclaw/launcher/config.json")
+}
+
+pub fn pending_update_path(app_id: &str) -> std::path::PathBuf {
+    hermes_home().join(format!("yclaw/pending/{}/update.json", app_id))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn launcher_state_path_under_hermes_var() {
+        let state = super::launcher_state_path();
+        assert!(state.to_str().unwrap().contains("yclaw"));
+        assert!(state.to_str().unwrap().contains("state"));
+    }
+}
