@@ -254,6 +254,8 @@ pub fn run() {
             launcher::commands::probe_network,
             launcher::commands::set_default_app,
             launcher::commands::check_for_updates,
+            launcher::commands::pre_download_update,
+            launcher::commands::apply_pending_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Hermes Setup");

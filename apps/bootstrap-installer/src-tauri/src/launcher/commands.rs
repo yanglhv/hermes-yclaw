@@ -116,6 +116,38 @@ pub fn check_for_updates(state: State<'_, LauncherStateHandle>) -> Vec<String> {
     state.0.lock().unwrap().pending_updates.keys().cloned().collect()
 }
 
+#[tauri::command]
+pub async fn pre_download_update(id: String, state: State<'_, LauncherStateHandle>) -> Result<(), String> {
+    let app = crate::app::AppDescriptor::literal_hermes();
+    let resolved = super::config::config::resolve();
+    let install_script_repo = crate::install_script::RepoRef {
+        owner: resolved.repo.split('/').next().unwrap_or("").into(),
+        name: resolved.repo.split('/').nth(1).unwrap_or("").into(),
+        ref_name: resolved.r#ref.clone(),
+    };
+    let latest_commit = "pending".to_string();
+
+    let mut tmp_state = LauncherState::default();
+    super::update::update::pre_download_update(&app, &install_script_repo, &latest_commit, &mut tmp_state)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut s = state.0.lock().unwrap();
+    if let Some(pu) = tmp_state.pending_updates.get(&app.id) {
+        s.pending_updates.insert(app.id.clone(), pu.clone());
+    }
+    state::save_launcher_state(&s).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn apply_pending_update(id: String, state: State<'_, LauncherStateHandle>) -> Result<(), String> {
+    let s = state.0.lock().unwrap();
+    let _script = super::update::update::resolve_cached_script(&s, &id).ok_or_else(|| format!("No cached script for {id}"))?;
+    tracing::info!(id, "apply_pending_update invoked (bootstrap deferred to M6)");
+    Ok(())
+}
+
 pub fn load_initial_state() -> LauncherStateHandle {
     let mut s = state::load_launcher_state().unwrap_or_else(|e| {
         tracing::warn!(err = %e, "failed to load launcher state; using default");
