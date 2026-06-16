@@ -102,7 +102,7 @@ pub async fn start_bootstrap(
     let cancel_rx = Arc::new(Mutex::new(Some(cancel_rx)));
 
     tokio::spawn(async move {
-        let result = run_bootstrap(app_for_task.clone(), args_for_task, cancel_rx).await;
+        let result = run_bootstrap(&crate::app::AppDescriptor::literal_hermes(), app_for_task.clone(), args_for_task, cancel_rx).await;
 
         // Reflect terminal state into AppState so get_bootstrap_status()
         // can serve it after the task exits.
@@ -341,6 +341,7 @@ fn desktop_launch_command_std(
 // ---------------------------------------------------------------------------
 
 async fn run_bootstrap(
+    app_descriptor: &crate::app::AppDescriptor,
     app: AppHandle,
     args: StartBootstrapArgs,
     cancel_rx_holder: Arc<Mutex<Option<mpsc::Receiver<()>>>>,
@@ -648,7 +649,7 @@ async fn run_bootstrap(
         .hermes_home
         .clone()
         .unwrap_or_else(|| crate::paths::hermes_home().to_string_lossy().into_owned());
-    let install_root = PathBuf::from(&hermes_home).join("hermes-agent");
+    let install_root = crate::paths::hermes_home().join(&app_descriptor.install_root);
 
     // Copy ourselves to HERMES_HOME/hermes-setup.exe so the desktop app can
     // re-invoke us with `--update` and shortcuts have a stable target. This is
@@ -829,6 +830,12 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::path::Path;
+
+    #[test]
+    fn run_bootstrap_accepts_app_descriptor() {
+        let app = super::super::app::AppDescriptor::literal_hermes();
+        assert_eq!(app.id, "hermes");
+    }
 
     fn unique_tmp_dir(tag: &str) -> PathBuf {
         let base = std::env::temp_dir().join(format!(
