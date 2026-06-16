@@ -8,6 +8,7 @@
 //! here — a crate-level attribute on a lib doesn't propagate to the linker
 //! flags of the executable that consumes it.
 
+mod app;
 mod bootstrap;
 mod events;
 mod install_script;
