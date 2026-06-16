@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::blocking::Client;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct NetworkProbeResult {
     pub has_internet: bool,
     pub latency_ms: Option<u64>,

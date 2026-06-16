@@ -113,6 +113,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .manage(Arc::new(AppState::new(mode)))
+        .manage(launcher::commands::load_initial_state())
         .setup(move |app| {
             use tauri::Manager;
             // Launcher fast path (macOS only): a bare ("Install") launch when
@@ -182,6 +183,17 @@ pub fn run() {
             paths::get_log_path,
             paths::get_hermes_home,
             paths::open_log_dir,
+            // Launcher commands
+            launcher::commands::list_available_apps,
+            launcher::commands::get_app,
+            launcher::commands::get_launcher_state,
+            launcher::commands::get_launcher_config,
+            launcher::commands::save_launcher_state,
+            launcher::commands::save_launcher_config,
+            launcher::commands::list_catalog_apps,
+            launcher::commands::probe_network,
+            launcher::commands::set_default_app,
+            launcher::commands::check_for_updates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Hermes Setup");
@@ -230,5 +242,11 @@ mod tests {
             AppMode::from_args(["--update", "--reinstall"]),
             AppMode::Update
         );
+    }
+
+    #[test]
+    fn get_launcher_state_returns_result() {
+        let result = crate::launcher::state::load_launcher_state();
+        assert!(result.is_ok());
     }
 }
