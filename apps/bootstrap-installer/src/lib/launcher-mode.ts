@@ -9,10 +9,22 @@ export interface LauncherConfig {
   update: { check_on_launch: boolean; auto_pre_download: boolean; check_interval_seconds: number };
   ui: { start_minimized: boolean; show_pending_update_banner: boolean };
 }
+export interface PendingUpdate {
+  latest_commit: string;
+  latest_ref_name: string;
+  status: "avail" | "downloading" | "ready" | "failed";
+  installed_ref_name?: string;
+  installed_commit?: string;
+  downloaded_script?: string | null;
+  downloaded_at?: string | null;
+  last_error?: string | null;
+  last_error_at?: string | null;
+}
+
 export interface LaunchableApp {
   descriptor: { id: string; display_name: string; default: boolean; app_settings_url: string | null; min_launcher_version: string };
   installed: any | null;
-  pending: { status: "avail"|"downloading"|"ready"|"failed" } | null;
+  pending: PendingUpdate | null;
   launcher_too_old: boolean;
 }
 
