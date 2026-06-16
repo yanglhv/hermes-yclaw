@@ -49,3 +49,39 @@
     transparent 60%
   );
 }
+
+.mini-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.mini-progress__stage {
+  color: var(--text-secondary, #6b7280);
+  min-width: 4rem;
+}
+
+.mini-progress__percent {
+  font-variant-numeric: tabular-nums;
+  min-width: 2.5rem;
+  text-align: right;
+  color: var(--text-primary, #1f2937);
+}
+
+.mini-progress__bar {
+  flex: 1;
+  min-width: 80px;
+  height: 4px;
+  background: var(--border, #e5e7eb);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mini-progress__fill {
+  height: 100%;
+  background: var(--primary, #3b82f6);
+  border-radius: 2px;
+  transition: width 0.3s ease-out;
+}
