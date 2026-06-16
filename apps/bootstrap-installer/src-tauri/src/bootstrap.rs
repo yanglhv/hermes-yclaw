@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, Mutex};
 
 use crate::events::{BootstrapEvent, LogStream, Manifest, StageState};
-use crate::install_script::{self, Pin, ScriptKind, ScriptSource};
+use crate::install_script::{self, Pin, RepoRef, ScriptKind, ScriptSource, cached_path};
 use crate::powershell::{self, StreamSink};
 use crate::AppState;
 
@@ -377,7 +377,13 @@ async fn run_bootstrap(
     };
 
     // 1. Resolve install.ps1
-    let script = install_script::resolve(kind, &pin, &emit_log)
+    let repo = RepoRef::hardcoded_default();
+    let app_relative_script_path = match kind {
+        ScriptKind::Ps1 => "scripts/install.ps1",
+        ScriptKind::Sh => "scripts/install.sh",
+    };
+    let cached = cached_path(kind, &repo.ref_name);
+    let script = install_script::resolve(&repo, app_relative_script_path, &cached)
         .await
         .map_err(|e| {
             let msg = format!("resolve install script failed: {e:#}");

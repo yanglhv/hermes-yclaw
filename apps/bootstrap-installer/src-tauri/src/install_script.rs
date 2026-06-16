@@ -89,79 +89,53 @@ fn is_valid_commit(s: &str) -> bool {
 
 /// Resolves the install script to use for this run.
 ///
-/// `pin` is the commit-or-branch from either Hermes-Setup's build-time
-/// constant (compiled into the installer) or a runtime override.
+/// `repo` provides the GitHub owner/name/ref; `app_relative_script_path`
+/// is the path under that repo's scripts/ directory (e.g. `"install.ps1"`).
 pub async fn resolve(
-    kind: ScriptKind,
-    pin: &Pin,
-    emit_log: &impl Fn(&str),
+    repo: &RepoRef,
+    app_relative_script_path: &str,
+    cached_path: &Path,
 ) -> Result<ResolvedScript> {
     // 1. Dev shortcut.
     if let Ok(repo_root) = std::env::var("HERMES_SETUP_DEV_REPO_ROOT") {
-        let candidate = PathBuf::from(repo_root).join("scripts").join(kind.filename());
+        let candidate = PathBuf::from(repo_root).join(app_relative_script_path);
         if candidate.exists() {
-            emit_log(&format!(
-                "[bootstrap] dev mode — using local {} at {}",
-                kind.filename(),
-                candidate.display()
-            ));
             return Ok(ResolvedScript {
                 path: candidate,
                 source: ScriptSource::DevCheckout,
-                commit: pin.commit.clone(),
-                branch: pin.branch.clone(),
+                commit: Some(repo.ref_name.clone()),
+                branch: None,
             });
         }
     }
 
     // 2. (Not implemented) bundled fallback.
 
-    // 3. Network. Pin must be a real commit or a branch ref.
-    let commit_or_ref = match (&pin.commit, &pin.branch) {
-        (Some(c), _) if is_valid_commit(c) => c.clone(),
-        (_, Some(b)) if !b.trim().is_empty() => b.clone(),
-        (Some(other), _) => {
-            return Err(anyhow!(
-                "install script pin commit `{other}` is not a valid git SHA"
-            ));
-        }
-        _ => {
-            return Err(anyhow!(
-                "no install-script pin supplied — installer cannot resolve a script source"
-            ));
-        }
-    };
-
-    let cached = cached_path(kind, &commit_or_ref);
-    if cached.exists() {
-        emit_log(&format!(
-            "[bootstrap] using cached {} for {}",
-            kind.filename(),
-            truncate_ref(&commit_or_ref)
+    // 3. Network. ref_name must be a real commit or a branch ref.
+    let commit_or_ref = repo.ref_name.clone();
+    if !is_valid_commit(&commit_or_ref) && commit_or_ref.trim().is_empty() {
+        return Err(anyhow!(
+            "install script ref `{}` is not a valid git SHA or branch name",
+            commit_or_ref
         ));
+    }
+
+    if cached_path.exists() {
         return Ok(ResolvedScript {
-            path: cached,
+            path: cached_path.to_path_buf(),
             source: ScriptSource::Cached,
-            commit: pin.commit.clone(),
-            branch: pin.branch.clone(),
+            commit: Some(commit_or_ref.clone()),
+            branch: None,
         });
     }
 
-    emit_log(&format!(
-        "[bootstrap] downloading {} for {} from GitHub",
-        kind.filename(),
-        truncate_ref(&commit_or_ref)
-    ));
-
-    download(kind, &commit_or_ref, &cached).await?;
-
-    emit_log(&format!("[bootstrap] cached to {}", cached.display()));
+    download(repo, app_relative_script_path, cached_path).await?;
 
     Ok(ResolvedScript {
-        path: cached,
+        path: cached_path.to_path_buf(),
         source: ScriptSource::Downloaded,
-        commit: pin.commit.clone(),
-        branch: pin.branch.clone(),
+        commit: Some(commit_or_ref),
+        branch: None,
     })
 }
 
@@ -171,7 +145,7 @@ pub struct Pin {
     pub branch: Option<String>,
 }
 
-fn cached_path(kind: ScriptKind, commit_or_ref: &str) -> PathBuf {
+pub fn cached_path(kind: ScriptKind, commit_or_ref: &str) -> PathBuf {
     let safe = sanitize_ref(commit_or_ref);
     let filename = match kind {
         ScriptKind::Ps1 => format!("install-{safe}.ps1"),
@@ -202,14 +176,17 @@ fn truncate_ref(s: &str) -> &str {
     }
 }
 
+pub fn build_raw_url(repo: &RepoRef, app_relative_script_path: &str) -> String {
+    format!(
+        "https://raw.githubusercontent.com/{}/{}/{}/{}",
+        repo.owner, repo.name, repo.ref_name, app_relative_script_path
+    )
+}
+
 /// Downloads to `dest_path` via reqwest with rustls. Atomically renames
 /// `dest_path.tmp` → `dest_path` so partial writes don't poison the cache.
-async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Result<()> {
-    let url = format!(
-        "https://raw.githubusercontent.com/NousResearch/hermes-agent/{}/scripts/{}",
-        commit_or_ref,
-        kind.filename()
-    );
+async fn download(repo: &RepoRef, app_relative_script_path: &str, dest_path: &Path) -> Result<()> {
+    let url = build_raw_url(repo, app_relative_script_path);
 
     if let Some(parent) = dest_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| {
@@ -235,7 +212,7 @@ async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Re
     if !response.status().is_success() {
         return Err(anyhow!(
             "Failed to download {}: HTTP {} from {}",
-            kind.filename(),
+            app_relative_script_path,
             response.status(),
             url
         ));
@@ -294,5 +271,26 @@ mod tests {
         assert_eq!(r.owner, "NousResearch");
         assert_eq!(r.name, "hermes-agent");
         assert_eq!(r.ref_name, "main");
+    }
+
+    #[test]
+    fn build_raw_url_uses_repo_ref() {
+        let r = super::RepoRef {
+            owner: "alice".into(),
+            name: "x".into(),
+            ref_name: "main".into(),
+        };
+        let url = super::build_raw_url(&r, "scripts/install.sh");
+        assert_eq!(url, "https://raw.githubusercontent.com/alice/x/main/scripts/install.sh");
+    }
+
+    #[test]
+    fn build_raw_url_with_legacy_default_matches_existing() {
+        let r = super::RepoRef::hardcoded_default();
+        let url = super::build_raw_url(&r, "scripts/install.ps1");
+        assert_eq!(
+            url,
+            "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1"
+        );
     }
 }
