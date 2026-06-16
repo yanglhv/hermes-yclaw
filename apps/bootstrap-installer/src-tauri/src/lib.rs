@@ -12,6 +12,7 @@ mod app;
 mod bootstrap;
 mod events;
 mod install_script;
+mod launcher;
 mod powershell;
 mod paths;
 mod update;
