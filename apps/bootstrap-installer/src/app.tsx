@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react'
 import { useEffect } from 'react'
-import { $route, $currentAppId, $apps, initialize } from './store'
+import { $route, $currentAppId, $apps, initialize, applyPendingUpdate } from './store'
 import { fetchLaunchMode, resolveInitialRoute } from './lib/launcher-mode'
 import Welcome from './routes/welcome'
 import Progress from './routes/progress'
@@ -37,7 +37,7 @@ export default function App() {
   function handleInstallAllPending() {
     const ready = Object.values(apps).filter((a) => a.pending?.status === 'ready')
     for (const app of ready) {
-      $currentAppId.set(app.descriptor.id)
+      void applyPendingUpdate(app.descriptor.id)
     }
   }
 

@@ -403,9 +403,11 @@ export async function preDownloadUpdate(id: string): Promise<void> {
   await invoke('pre_download_update', { id })
 }
 
-export function applyPendingUpdate(id: string): void {
+export async function applyPendingUpdate(id: string): Promise<void> {
   $currentAppId.set(id)
   $route.set('progress')
+  await invoke('apply_pending_update', { appId: id })
+  await loadAppsList()
 }
 
 export async function openAppSettings(id: string): Promise<void> {
