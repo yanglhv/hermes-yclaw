@@ -4,15 +4,15 @@ import { Button } from '../components/button'
 import {
   $logPath,
   $mode,
+  $bootstrap_computed,
   openLogDir,
   startInstall,
-  startUpdate,
-  type BootstrapStateModel
+  startUpdate
 } from '../store'
 import { RefreshCw, FileText } from 'lucide-react'
 
 interface FailureProps {
-  bootstrap: BootstrapStateModel
+  appId: string
 }
 
 /*
@@ -22,7 +22,9 @@ interface FailureProps {
  * The actual error message lives below in muted text. Two clear
  * affordances: Retry (primary) and Open log folder (secondary).
  */
-export default function Failure({ bootstrap }: FailureProps) {
+export default function Failure({ appId: _appId }: FailureProps) {
+  void _appId
+  const bootstrap = useStore($bootstrap_computed)
   const logPath = useStore($logPath)
   const mode = useStore($mode)
   const isUpdate = mode === 'update'

@@ -15,7 +15,12 @@ import { Rocket, AlertCircle } from 'lucide-react'
  * had `onClick={() => void launchHermesDesktop()}` which swallowed
  * the rejection and left the user staring at an unresponsive button.
  */
-export default function Success() {
+interface SuccessProps {
+  appId: string
+}
+
+export default function Success({ appId: _appId }: SuccessProps) {
+  void _appId
   const [error, setError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
 

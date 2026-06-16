@@ -3,15 +3,14 @@ import { useStore } from '@nanostores/react'
 import { Button } from '../components/button'
 import {
   cancelInstall,
-  $progress,
-  type BootstrapStateModel,
+  $bootstrap_computed,
   type StageState
 } from '../store'
 import { Check, X, ChevronRight, FileText, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 
 interface ProgressProps {
-  bootstrap: BootstrapStateModel
+  appId: string
 }
 
 /*
@@ -19,8 +18,16 @@ interface ProgressProps {
  * the DS <Progress> for the top bar so its motion + ring match the rest
  * of the product.
  */
-export default function ProgressScreen({ bootstrap }: ProgressProps) {
-  const progress = useStore($progress)
+export default function ProgressScreen({ appId: _appId }: ProgressProps) {
+  void _appId
+  const bootstrap = useStore($bootstrap_computed)
+  const total = bootstrap.stageOrder.length
+  let done = 0
+  for (const name of bootstrap.stageOrder) {
+    const s = bootstrap.stages[name]?.state
+    if (s === 'succeeded' || s === 'skipped' || s === 'failed') done += 1
+  }
+  const progressFraction = total > 0 ? done / total : 0
   const [showLogs, setShowLogs] = useState(false)
   const logEndRef = useRef<HTMLDivElement>(null)
 
@@ -54,7 +61,7 @@ export default function ProgressScreen({ bootstrap }: ProgressProps) {
             </span>
           </div>
           <div className="text-muted-foreground">
-            {progress.done} of {progress.total} steps
+            {done} of {total} steps
           </div>
         </div>
         {/* Top progress bar — plain HTML, derived from --primary so it
@@ -62,7 +69,7 @@ export default function ProgressScreen({ bootstrap }: ProgressProps) {
         <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
           <div
             className="h-full bg-primary transition-all duration-300 ease-out"
-            style={{ width: `${Math.max(2, progress.fraction * 100)}%` }}
+            style={{ width: `${Math.max(2, progressFraction * 100)}%` }}
           />
         </div>
       </div>
