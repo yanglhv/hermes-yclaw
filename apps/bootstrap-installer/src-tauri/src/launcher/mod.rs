@@ -6,3 +6,4 @@ pub mod commands;
 pub mod silent;
 pub mod launch;
 pub mod update;
+pub mod uninstall;
