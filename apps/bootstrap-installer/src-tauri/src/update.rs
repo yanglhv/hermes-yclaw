@@ -87,7 +87,8 @@ pub async fn start_update(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     tokio::spawn(async move {
-        if let Err(err) = run_update(app.clone()).await {
+        let app_descriptor = crate::app::AppDescriptor::literal_hermes();
+        if let Err(err) = run_update(&app_descriptor, app.clone()).await {
             // run_update already emits a Failed event on the paths that matter;
             // this catches anything that escaped. Emit defensively.
             emit(
@@ -103,9 +104,8 @@ pub async fn start_update(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-async fn run_update(app: AppHandle) -> Result<()> {
-    let hermes_home = crate::paths::hermes_home();
-    let install_root = hermes_home.join("hermes-agent");
+async fn run_update(app: &crate::app::AppDescriptor, tauri_app: AppHandle) -> Result<()> {
+    let install_root = crate::paths::hermes_home().join(&app.install_root);
     let update_branch = update_branch_from_args(std::env::args().skip(1))
         .or_else(|| option_env_string("BUILD_PIN_BRANCH"))
         .unwrap_or_else(|| "main".to_string());
@@ -117,12 +117,13 @@ async fn run_update(app: AppHandle) -> Result<()> {
 
     let hermes = resolve_hermes(&install_root).ok_or_else(|| {
         let msg = format!(
-            "Could not find the hermes CLI under {}. Is Hermes installed? \
+            "Could not find the hermes CLI under {}. Is {} installed? \
              Re-run the installer to repair the install.",
-            install_root.display()
+            install_root.display(),
+            app.display_name
         );
         emit(
-            &app,
+            &tauri_app,
             BootstrapEvent::Failed {
                 stage: None,
                 error: msg.clone(),
@@ -133,7 +134,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
 
     // Synthetic manifest so the existing progress UI renders our two stages.
     let mut stages = vec![
-        stage_info("update", "Updating Hermes"),
+        stage_info("update", &format!("Updating {}", app.display_name)),
         stage_info("rebuild", "Rebuilding the desktop app"),
     ];
     if cfg!(target_os = "macos") && target_app.is_some() {
@@ -141,7 +142,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
     }
 
     emit(
-        &app,
+        &tauri_app,
         BootstrapEvent::Manifest {
             stages,
             protocol_version: None,
@@ -154,7 +155,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
     // aborts with exit 2. If it still holds the packaged app.asar,
     // install.ps1's repair/re-clone path cannot move/remove the install tree.
     // Give both handles a bounded window to clear.
-    wait_for_install_locks_free(&install_root, &app, "update").await;
+    wait_for_install_locks_free(&install_root, &tauri_app, "update").await;
 
     // ---- stage 1: hermes update -----------------------------------------
     // Pass --branch so `hermes update` targets the branch this installer was
@@ -166,7 +167,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
     // detected the update against this same branch, so we must update against
     // it too.
     emit_log(
-        &app,
+        &tauri_app,
         Some("update"),
         LogStream::Stdout,
         &format!("[update] updating against branch {update_branch}"),
@@ -184,10 +185,10 @@ async fn run_update(app: AppHandle) -> Result<()> {
     update_args.push("--branch".into());
     update_args.push(update_branch);
 
-    emit_stage(&app, "update", StageState::Running, None, None);
+    emit_stage(&tauri_app, "update", StageState::Running, None, None);
     let started = Instant::now();
     let mut update = run_streamed(
-        &app,
+        &tauri_app,
         &hermes,
         &update_args,
         &install_root,
@@ -211,14 +212,14 @@ async fn run_update(app: AppHandle) -> Result<()> {
     // a retry can't fix.
     if !matches!(update.exit_code, Some(0) | Some(UPDATE_EXIT_CONCURRENT)) {
         emit_log(
-            &app,
+            &tauri_app,
             Some("update"),
             LogStream::Stdout,
             "[update] first update attempt failed; retrying once (the fix it just \
              pulled loads on the second run)…",
         );
         update = run_streamed(
-            &app,
+            &tauri_app,
             &hermes,
             &update_args,
             &install_root,
@@ -231,21 +232,22 @@ async fn run_update(app: AppHandle) -> Result<()> {
 
     match update.exit_code {
         Some(0) => {
-            emit_stage(&app, "update", StageState::Succeeded, Some(update_ms), None);
+            emit_stage(&tauri_app, "update", StageState::Succeeded, Some(update_ms), None);
         }
         Some(code) if code == UPDATE_EXIT_CONCURRENT => {
-            let msg = "Hermes is still running. Close all Hermes windows and try \
-                       the update again."
-                .to_string();
+            let msg = format!(
+                "{} is still running. Close all {} windows and try the update again.",
+                app.display_name, app.display_name
+            );
             emit_stage(
-                &app,
+                &tauri_app,
                 "update",
                 StageState::Failed,
                 Some(update_ms),
                 Some(msg.clone()),
             );
             emit(
-                &app,
+                &tauri_app,
                 BootstrapEvent::Failed {
                     stage: Some("update".into()),
                     error: msg.clone(),
@@ -263,14 +265,14 @@ async fn run_update(app: AppHandle) -> Result<()> {
                     .display()
             );
             emit_stage(
-                &app,
+                &tauri_app,
                 "update",
                 StageState::Failed,
                 Some(update_ms),
                 Some(msg.clone()),
             );
             emit(
-                &app,
+                &tauri_app,
                 BootstrapEvent::Failed {
                     stage: Some("update".into()),
                     error: msg.clone(),
@@ -283,11 +285,11 @@ async fn run_update(app: AppHandle) -> Result<()> {
     // ---- stage 2: hermes desktop --build-only ----------------------------
     // `hermes update` deliberately does NOT build apps/desktop (it installs
     // repo-root deps with --workspaces=false). This is the rebuild it skips.
-    emit_stage(&app, "rebuild", StageState::Running, None, None);
+    emit_stage(&tauri_app, "rebuild", StageState::Running, None, None);
     let started = Instant::now();
     let rebuild_args: Vec<String> = vec!["desktop".into(), "--build-only".into()];
     let rebuild = run_streamed(
-        &app,
+        &tauri_app,
         &hermes,
         &rebuild_args,
         &install_root,
@@ -305,14 +307,14 @@ async fn run_update(app: AppHandle) -> Result<()> {
             rebuild.exit_code
         );
         emit_stage(
-            &app,
+            &tauri_app,
             "rebuild",
             StageState::Failed,
             Some(rebuild_ms),
             Some(msg.clone()),
         );
         emit(
-            &app,
+            &tauri_app,
             BootstrapEvent::Failed {
                 stage: Some("rebuild".into()),
                 error: msg.clone(),
@@ -320,15 +322,15 @@ async fn run_update(app: AppHandle) -> Result<()> {
         );
         return Err(anyhow!(msg));
     }
-    emit_stage(&app, "rebuild", StageState::Succeeded, Some(rebuild_ms), None);
+    emit_stage(&tauri_app, "rebuild", StageState::Succeeded, Some(rebuild_ms), None);
 
     let launch_target = if let Some(target_app) = target_app {
         let started = Instant::now();
-        emit_stage(&app, "install", StageState::Running, None, None);
-        match install_macos_app_update(&app, &install_root, &target_app).await {
+        emit_stage(&tauri_app, "install", StageState::Running, None, None);
+        match install_macos_app_update(&tauri_app, &install_root, &target_app).await {
             Ok(installed_app) => {
                 emit_stage(
-                    &app,
+                    &tauri_app,
                     "install",
                     StageState::Succeeded,
                     Some(started.elapsed().as_millis() as u64),
@@ -339,14 +341,14 @@ async fn run_update(app: AppHandle) -> Result<()> {
             Err(err) => {
                 let msg = format!("{err:#}");
                 emit_stage(
-                    &app,
+                    &tauri_app,
                     "install",
                     StageState::Failed,
                     Some(started.elapsed().as_millis() as u64),
                     Some(msg.clone()),
                 );
                 emit(
-                    &app,
+                    &tauri_app,
                     BootstrapEvent::Failed {
                         stage: Some("install".into()),
                         error: msg.clone(),
@@ -361,7 +363,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
 
     // ---- done: signal complete, then launch the fresh desktop ------------
     emit(
-        &app,
+        &tauri_app,
         BootstrapEvent::Complete {
             install_root: install_root.to_string_lossy().into_owned(),
             marker: None,
@@ -369,25 +371,31 @@ async fn run_update(app: AppHandle) -> Result<()> {
     );
 
     if let Some(target_app) = launch_target {
-        if let Err(err) = launch_macos_app_and_exit(&app, &target_app).await {
+        if let Err(err) = launch_macos_app_and_exit(&tauri_app, &target_app).await {
             emit_log(
-                &app,
+                &tauri_app,
                 None,
                 LogStream::Stderr,
-                &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+                &format!(
+                    "[update] could not auto-launch desktop: {err}. Launch {} manually.",
+                    app.display_name
+                ),
             );
         }
     } else if let Err(err) =
-        crate::bootstrap::launch_hermes_desktop(app.clone(), install_root.to_string_lossy().into_owned()).await
+        crate::bootstrap::launch_hermes_desktop(tauri_app.clone(), install_root.to_string_lossy().into_owned()).await
     {
         // Launch failed: don't hard-fail the update (it succeeded); surface a
         // log line so the success screen can still tell the user to launch
         // manually.
         emit_log(
-            &app,
+            &tauri_app,
             None,
             LogStream::Stdout,
-            &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+            &format!(
+                "[update] could not auto-launch desktop: {err}. Launch {} manually.",
+                app.display_name
+            ),
         );
     }
 
@@ -1069,5 +1077,11 @@ mod tests {
         );
         assert!(!old.exists(), "backup should be rolled back, not left behind");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn run_update_accepts_app_descriptor() {
+        let app = super::super::app::AppDescriptor::literal_hermes();
+        assert!(app.uninstall_supported);
     }
 }
