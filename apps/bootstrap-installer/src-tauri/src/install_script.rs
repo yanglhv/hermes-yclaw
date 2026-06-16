@@ -19,6 +19,23 @@ use tokio::io::AsyncWriteExt;
 
 use crate::paths;
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RepoRef {
+    pub owner: String,
+    pub name: String,
+    pub ref_name: String,
+}
+
+impl RepoRef {
+    pub fn hardcoded_default() -> Self {
+        Self {
+            owner: "NousResearch".into(),
+            name: "hermes-agent".into(),
+            ref_name: "main".into(),
+        }
+    }
+}
+
 /// Identity of the install.ps1 we'll execute. Used by both the manifest
 /// fetch and the per-stage runs.
 #[derive(Debug, Clone)]
@@ -269,5 +286,13 @@ mod tests {
         assert_eq!(sanitize_ref("bb/gui"), "bb_gui");
         assert_eq!(sanitize_ref("main"), "main");
         assert_eq!(sanitize_ref("release/1.2.3"), "release_1.2.3");
+    }
+
+    #[test]
+    fn repo_ref_hardcoded_default_matches_legacy() {
+        let r = super::RepoRef::hardcoded_default();
+        assert_eq!(r.owner, "NousResearch");
+        assert_eq!(r.name, "hermes-agent");
+        assert_eq!(r.ref_name, "main");
     }
 }
