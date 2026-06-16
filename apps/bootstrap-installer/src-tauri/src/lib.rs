@@ -87,6 +87,20 @@ impl AppState {
     }
 }
 
+pub fn launch_args_from_args<I, S>(args: I) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut iter = args.into_iter();
+    while let Some(a) = iter.next() {
+        if a.as_ref() == "--launch" {
+            return iter.next().map(|s| s.as_ref().to_string());
+        }
+    }
+    None
+}
+
 /// Frontend → Rust: which flow should the UI render?
 #[tauri::command]
 fn get_mode(state: tauri::State<'_, Arc<AppState>>) -> AppMode {
@@ -116,29 +130,75 @@ pub fn run() {
         .manage(launcher::commands::load_initial_state())
         .setup(move |app| {
             use tauri::Manager;
-            // Launcher fast path (macOS only): a bare ("Install") launch when
-            // Hermes is already installed should NOT show the installer or
-            // rebuild — it should just open the app, so the /Applications
-            // "Hermes" doubles as a normal launcher (first run installs, every
-            // later run launches instantly). The window is kept hidden until
-            // here via `"visible": false` so this path never flashes a window.
-            //
-            // Gated to macOS deliberately: on Windows/Linux the installer keeps
-            // its existing behavior (Windows users relaunch via the Start
-            // Menu/Desktop "Hermes" shortcuts that install.ps1 creates, and a
-            // reliable detached relaunch there needs the DETACHED_PROCESS +
-            // startup-grace handling used by launch_hermes_desktop — out of
-            // scope here). So this is a pure no-op on non-macOS.
-            //
-            // `--reinstall`/`--repair` opts out so a broken install can be
-            // repaired by re-running setup instead of launching the bad app.
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            let launch_target = launch_args_from_args(args.iter().map(String::as_str));
+            let settings_requested = args.iter().any(|a| a == "--settings");
+
+            let state: tauri::State<std::sync::Arc<launcher::commands::LauncherStateHandle>> =
+                app.state();
+            let launcher_state = state.0.lock().unwrap().clone();
+            let kind = launcher::silent::classify_launch_state(
+                &launcher_state,
+                args.iter().map(String::as_str),
+            );
+
+            // CLI dispatch: non-UI paths that short-circuit before window creation
+            match kind {
+                launcher::silent::LaunchKind::FirstInstall => {
+                    tracing::info!("CLI dispatch: FirstInstall → run_silent_default");
+                }
+                launcher::silent::LaunchKind::Silent => {
+                    tracing::info!("CLI dispatch: Silent → run_silent_default");
+                }
+                launcher::silent::LaunchKind::Launch => {
+                    tracing::info!(?launch_target, "CLI dispatch: Launch");
+                    if let Some(id) = &launch_target {
+                        if let Some(inst) = launcher_state.installed.get(id) {
+                            let descriptor = crate::app::AppDescriptor::literal_hermes();
+                            if launcher::launch::launch_and_exit(&descriptor, inst).is_ok() {
+                                std::thread::sleep(std::time::Duration::from_millis(150));
+                                app.handle().exit(0);
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                launcher::silent::LaunchKind::Update => {
+                    tracing::info!("CLI dispatch: Update → fall through to UI");
+                }
+                launcher::silent::LaunchKind::Settings => {
+                    tracing::info!("CLI dispatch: Settings → fall through to UI");
+                }
+            }
+
+            // Portable silent default: a bare ("Install") launch when Hermes is
+            // already installed should silently launch the app and exit.
+            if mode == AppMode::Install
+                && !force_setup
+                && launch_target.is_none()
+                && !settings_requested
+            {
+                let id = launcher_state
+                    .default_app_id
+                    .clone()
+                    .unwrap_or_else(|| "hermes".into());
+                if let Some(inst) = launcher_state.installed.get(&id) {
+                    let descriptor = crate::app::AppDescriptor::literal_hermes();
+                    if launcher::launch::launch_and_exit(&descriptor, inst).is_ok() {
+                        std::thread::sleep(std::time::Duration::from_millis(150));
+                        app.handle().exit(0);
+                        return Ok(());
+                    }
+                }
+            }
+
+            // macOS fast path: double-click on Hermes.app launches installed app
+            // without showing the installer window.
             if cfg!(target_os = "macos") && mode == AppMode::Install && !force_setup {
                 let install_root = paths::hermes_home().join("hermes-agent");
                 if bootstrap::hermes_is_installed(&install_root) {
                     match bootstrap::spawn_installed_desktop(&install_root) {
                         Ok(()) => {
-                            // Brief grace so the spawned app is registered
-                            // before we exit (mirrors launch_hermes_desktop).
                             std::thread::sleep(std::time::Duration::from_millis(200));
                             tracing::info!(
                                 "hermes already installed — relaunched desktop; exiting installer"
@@ -201,7 +261,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{force_setup_from_args, AppMode};
+    use super::{force_setup_from_args, AppMode, launch_args_from_args};
 
     #[test]
     fn bare_args_are_install() {
@@ -242,6 +302,24 @@ mod tests {
             AppMode::from_args(["--update", "--reinstall"]),
             AppMode::Update
         );
+    }
+
+    #[test]
+    fn cli_mode_is_decoded_from_args() {
+        let args = vec!["hermes-bootstrap".to_string(), "--launch".to_string()];
+        let state = crate::app::LauncherState::default();
+        let kind = crate::launcher::silent::classify_launch_state(&state, args);
+        assert!(matches!(kind, crate::launcher::silent::LaunchKind::Launch));
+    }
+
+    #[test]
+    fn parse_launch_args_returns_some_for_dash_launch() {
+        assert_eq!(
+            super::launch_args_from_args(["--launch", "myapp"]),
+            Some("myapp".to_string())
+        );
+        assert_eq!(super::launch_args_from_args(Vec::<String>::new()), None);
+        assert_eq!(super::launch_args_from_args(["--settings"]), None);
     }
 
     #[test]

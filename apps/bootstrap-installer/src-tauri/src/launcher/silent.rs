@@ -17,7 +17,7 @@ mod silent_tests {
     #[test]
     fn first_install_kind_when_state_empty() {
         assert_eq!(
-            classify_launch_state(&LauncherState::default(), None),
+            classify_launch_state(&LauncherState::default(), Vec::<String>::new()),
             LaunchKind::FirstInstall
         );
     }
@@ -36,7 +36,10 @@ mod silent_tests {
                 installed_via: "first_install".into(),
             },
         );
-        assert_eq!(classify_launch_state(&s, None), LaunchKind::Silent);
+        assert_eq!(
+            classify_launch_state(&s, Vec::<String>::new()),
+            LaunchKind::Silent
+        );
     }
 
     #[test]
@@ -54,8 +57,37 @@ mod silent_tests {
             },
         );
         assert_eq!(
-            classify_launch_state(&s, Some("--settings")),
+            classify_launch_state(&s, vec!["--settings"]),
             LaunchKind::Settings
+        );
+    }
+
+    #[test]
+    fn launch_kind_when_launch_flag() {
+        let mut s = LauncherState::default();
+        s.installed.insert(
+            "hermes".into(),
+            crate::app::InstalledApp {
+                install_root: "/x".into(),
+                installed_commit: "abc".into(),
+                installed_ref_type: "branch".into(),
+                installed_ref_name: "main".into(),
+                installed_at: "2026-06-16T00:00:00Z".into(),
+                installed_via: "first_install".into(),
+            },
+        );
+        assert_eq!(
+            classify_launch_state(&s, vec!["--launch", "hermes"]),
+            LaunchKind::Launch
+        );
+    }
+
+    #[test]
+    fn update_kind_when_update_flag() {
+        let s = LauncherState::default();
+        assert_eq!(
+            classify_launch_state(&s, vec!["--update"]),
+            LaunchKind::Update
         );
     }
 
@@ -90,12 +122,21 @@ pub enum LaunchKind {
     Update,
 }
 
-pub fn classify_launch_state(
-    state: &LauncherState,
-    settings_flag: Option<&str>,
-) -> LaunchKind {
-    if settings_flag == Some("--settings") {
+pub fn classify_launch_state<I, S>(state: &LauncherState, args: I) -> LaunchKind
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let args_vec: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
+
+    if args_vec.iter().any(|a| a.as_str() == "--settings") {
         return LaunchKind::Settings;
+    }
+    if args_vec.iter().any(|a| a.as_str() == "--launch") {
+        return LaunchKind::Launch;
+    }
+    if args_vec.iter().any(|a| a.as_str() == "--update") {
+        return LaunchKind::Update;
     }
     if state.installed.is_empty() {
         return LaunchKind::FirstInstall;
