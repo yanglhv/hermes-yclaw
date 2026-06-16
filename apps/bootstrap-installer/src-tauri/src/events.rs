@@ -70,6 +70,8 @@ pub enum BootstrapEvent {
         stages: Vec<StageInfo>,
         #[serde(rename = "protocolVersion")]
         protocol_version: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        app_id: Option<String>,
     },
     /// Stage state transition. `result` populated only on terminal states.
     Stage {
@@ -81,6 +83,8 @@ pub enum BootstrapEvent {
         result: Option<StageResultPayload>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        app_id: Option<String>,
     },
     /// Raw stdout/stderr line from install.ps1 (or our wrapper). `stream`
     /// tells the UI which pipe it came from so stderr can be styled subtly
@@ -90,18 +94,24 @@ pub enum BootstrapEvent {
         stage: Option<String>,
         line: String,
         stream: LogStream,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        app_id: Option<String>,
     },
     /// Sent once when all stages complete successfully.
     Complete {
         #[serde(rename = "installRoot")]
         install_root: String,
         marker: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        app_id: Option<String>,
     },
     /// Sent once if the run aborts.
     Failed {
         #[serde(skip_serializing_if = "Option::is_none")]
         stage: Option<String>,
         error: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        app_id: Option<String>,
     },
 }
 
@@ -109,4 +119,35 @@ impl BootstrapEvent {
     /// Tauri event name. Single channel for all bootstrap events; the
     /// `type` tag tells the renderer how to interpret the payload.
     pub const CHANNEL: &'static str = "bootstrap";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bootstrap_event_carries_optional_app_id() {
+        let evt = super::BootstrapEvent::Stage {
+            name: "venv".into(),
+            state: super::StageState::Running,
+            app_id: Some("myapp".into()),
+            duration_ms: None,
+            result: None,
+            error: None,
+        };
+        let json = serde_json::to_string(&evt).unwrap();
+        assert!(json.contains("\"app_id\":\"myapp\""));
+    }
+
+    #[test]
+    fn bootstrap_event_omits_null_app_id() {
+        let evt = super::BootstrapEvent::Log {
+            line: "starting".into(),
+            app_id: None,
+            stage: None,
+            stream: super::LogStream::Stdout,
+        };
+        let json = serde_json::to_string(&evt).unwrap();
+        assert!(!json.contains("app_id"));
+    }
 }

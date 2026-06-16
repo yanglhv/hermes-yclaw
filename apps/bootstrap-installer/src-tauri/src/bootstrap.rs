@@ -368,6 +368,7 @@ async fn run_bootstrap(
                 stage: None,
                 line: line.to_string(),
                 stream: LogStream::Stdout,
+                app_id: None,
             },
         );
         // Bump to info-level so the line shows in bootstrap-installer.log
@@ -393,6 +394,7 @@ async fn run_bootstrap(
                 BootstrapEvent::Failed {
                     stage: None,
                     error: msg.clone(),
+                    app_id: None,
                 },
             );
             anyhow!(msg)
@@ -445,6 +447,7 @@ async fn run_bootstrap(
             BootstrapEvent::Failed {
                 stage: None,
                 error: err.clone(),
+                app_id: None,
             },
         );
         return Err(anyhow!(err));
@@ -460,6 +463,7 @@ async fn run_bootstrap(
             BootstrapEvent::Failed {
                 stage: None,
                 error: err.clone(),
+                app_id: None,
             },
         );
         anyhow!(err)
@@ -470,6 +474,7 @@ async fn run_bootstrap(
         BootstrapEvent::Manifest {
             stages: manifest.stages.clone(),
             protocol_version: manifest.protocol_version,
+            app_id: None,
         },
     );
 
@@ -487,6 +492,7 @@ async fn run_bootstrap(
                     duration_ms: Some(0),
                     result: None,
                     error: Some("skipped by include_desktop=false".into()),
+                    app_id: None,
                 },
             );
             continue;
@@ -499,6 +505,7 @@ async fn run_bootstrap(
                 BootstrapEvent::Failed {
                     stage: Some(stage.name.clone()),
                     error: err.clone(),
+                    app_id: None,
                 },
             );
             return Err(anyhow!(err));
@@ -513,6 +520,7 @@ async fn run_bootstrap(
                 duration_ms: None,
                 result: None,
                 error: None,
+                app_id: None,
             },
         );
 
@@ -552,6 +560,7 @@ async fn run_bootstrap(
                     duration_ms: Some(duration_ms),
                     result: None,
                     error: Some("cancelled by user".into()),
+                    app_id: None,
                 },
             );
             emit_event(
@@ -559,6 +568,7 @@ async fn run_bootstrap(
                 BootstrapEvent::Failed {
                     stage: Some(stage.name.clone()),
                     error: "cancelled by user".into(),
+                    app_id: None,
                 },
             );
             return Err(anyhow!("cancelled by user"));
@@ -580,6 +590,7 @@ async fn run_bootstrap(
                         duration_ms: Some(duration_ms),
                         result: None,
                         error: Some(err.clone()),
+                        app_id: None,
                     },
                 );
                 emit_event(
@@ -587,6 +598,7 @@ async fn run_bootstrap(
                     BootstrapEvent::Failed {
                         stage: Some(stage.name.clone()),
                         error: err.clone(),
+                        app_id: None,
                     },
                 );
                 return Err(anyhow!(err));
@@ -600,6 +612,7 @@ async fn run_bootstrap(
                         duration_ms: Some(duration_ms),
                         result: Some(frame),
                         error: None,
+                        app_id: None,
                     },
                 );
             }
@@ -612,6 +625,7 @@ async fn run_bootstrap(
                         duration_ms: Some(duration_ms),
                         result: Some(frame),
                         error: None,
+                        app_id: None,
                     },
                 );
             }
@@ -628,6 +642,7 @@ async fn run_bootstrap(
                         duration_ms: Some(duration_ms),
                         result: Some(frame),
                         error: Some(err.clone()),
+                        app_id: None,
                     },
                 );
                 emit_event(
@@ -635,6 +650,7 @@ async fn run_bootstrap(
                     BootstrapEvent::Failed {
                         stage: Some(stage.name.clone()),
                         error: err.clone(),
+                        app_id: None,
                     },
                 );
                 return Err(anyhow!(err));
@@ -671,6 +687,7 @@ async fn run_bootstrap(
                 "pinnedCommit": pin.commit,
                 "pinnedBranch": pin.branch,
             })),
+            app_id: None,
         },
     );
 
@@ -709,6 +726,7 @@ async fn run_install_script(
                     stage: stage_for_stdout.clone(),
                     line: line.to_string(),
                     stream: LogStream::Stdout,
+                    app_id: None,
                 },
             );
             // Tee to the rolling installer log so we have a persistent
@@ -729,6 +747,7 @@ async fn run_install_script(
                     stage: stage_for_stderr.clone(),
                     line: line.to_string(),
                     stream: LogStream::Stderr,
+                    app_id: None,
                 },
             );
             // stderr-level lines get warn! so they're visually distinct
@@ -794,7 +813,7 @@ fn emit_event(app: &AppHandle, event: BootstrapEvent) {
         BootstrapEvent::Complete { install_root, .. } => {
             tracing::info!(install_root = %install_root, "bootstrap complete");
         }
-        BootstrapEvent::Failed { stage, error } => {
+        BootstrapEvent::Failed { stage, error, .. } => {
             tracing::error!(stage = ?stage, error = %error, "bootstrap FAILED");
         }
         BootstrapEvent::Log { .. } => {

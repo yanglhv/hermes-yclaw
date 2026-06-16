@@ -82,6 +82,7 @@ pub async fn start_update(app: AppHandle) -> Result<(), String> {
             BootstrapEvent::Manifest {
                 stages,
                 protocol_version: None,
+                app_id: None,
             },
         );
         return Ok(());
@@ -96,6 +97,7 @@ pub async fn start_update(app: AppHandle) -> Result<(), String> {
                 BootstrapEvent::Failed {
                     stage: None,
                     error: format!("{err:#}"),
+                    app_id: None,
                 },
             );
         }
@@ -127,6 +129,7 @@ async fn run_update(app: &crate::app::AppDescriptor, tauri_app: AppHandle) -> Re
             BootstrapEvent::Failed {
                 stage: None,
                 error: msg.clone(),
+                app_id: None,
             },
         );
         anyhow!(msg)
@@ -146,6 +149,7 @@ async fn run_update(app: &crate::app::AppDescriptor, tauri_app: AppHandle) -> Re
         BootstrapEvent::Manifest {
             stages,
             protocol_version: None,
+            app_id: None,
         },
     );
 
@@ -251,6 +255,7 @@ async fn run_update(app: &crate::app::AppDescriptor, tauri_app: AppHandle) -> Re
                 BootstrapEvent::Failed {
                     stage: Some("update".into()),
                     error: msg.clone(),
+                    app_id: None,
                 },
             );
             return Err(anyhow!(msg));
@@ -276,6 +281,7 @@ async fn run_update(app: &crate::app::AppDescriptor, tauri_app: AppHandle) -> Re
                 BootstrapEvent::Failed {
                     stage: Some("update".into()),
                     error: msg.clone(),
+                    app_id: None,
                 },
             );
             return Err(anyhow!(msg));
@@ -318,6 +324,7 @@ async fn run_update(app: &crate::app::AppDescriptor, tauri_app: AppHandle) -> Re
             BootstrapEvent::Failed {
                 stage: Some("rebuild".into()),
                 error: msg.clone(),
+                app_id: None,
             },
         );
         return Err(anyhow!(msg));
@@ -352,6 +359,7 @@ async fn run_update(app: &crate::app::AppDescriptor, tauri_app: AppHandle) -> Re
                     BootstrapEvent::Failed {
                         stage: Some("install".into()),
                         error: msg.clone(),
+                        app_id: None,
                     },
                 );
                 return Err(anyhow!(msg));
@@ -367,6 +375,7 @@ async fn run_update(app: &crate::app::AppDescriptor, tauri_app: AppHandle) -> Re
         BootstrapEvent::Complete {
             install_root: install_root.to_string_lossy().into_owned(),
             marker: None,
+            app_id: None,
         },
     );
 
@@ -906,6 +915,7 @@ fn emit_stage(
             duration_ms,
             result: None,
             error,
+            app_id: None,
         },
     );
 }
@@ -921,6 +931,7 @@ fn emit_log(app: &AppHandle, stage: Option<&str>, stream: LogStream, line: &str)
             stage: stage.map(|s| s.to_string()),
             line: line.to_string(),
             stream,
+            app_id: None,
         },
     );
 }
