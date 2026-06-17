@@ -1118,6 +1118,23 @@ show_manual_install_hint() {
 clone_repo() {
     log_info "Installing to $INSTALL_DIR..."
 
+    # ── F1 dev shortcut: HERMES_INSTALL_USE_LOCAL_REPO ──
+    # Lets a developer point the installer at a local checkout (typically a
+    # git worktree) so their uncommitted / unpushed edits in apps/desktop are
+    # used by the build instead of the upstream main HEAD. See spec §6.
+    local local_repo="${HERMES_INSTALL_USE_LOCAL_REPO:-}"
+    if [ -n "$local_repo" ]; then
+        local_repo="${local_repo%/}"  # strip trailing slash
+        if [ -d "$local_repo" ] && [ -d "$local_repo/.git" ]; then
+            log_info "Using local repo at $local_repo (HERMES_INSTALL_USE_LOCAL_REPO); skipping git clone"
+            _sync_local_repo_to_install_dir "$local_repo" "$INSTALL_DIR"
+            return
+        else
+            log_warn "HERMES_INSTALL_USE_LOCAL_REPO=$local_repo is not a valid git checkout; falling back to git clone"
+        fi
+    fi
+    # ── end F1 dev shortcut ──
+
     # An interrupted previous clone leaves a .git with no initial commit, where
     # the update path's `git stash` / `git checkout` abort with "You do not
     # have the initial commit yet" and fail the install (#40998). Move such a
@@ -1233,6 +1250,56 @@ clone_repo() {
     fi
 
     log_success "Repository ready"
+}
+
+_sync_local_repo_to_install_dir() {
+    local source="$1"
+    local dest="$2"
+
+    # Guard against source == dest (rsync with --delete is undefined when src
+    # and dest resolve to the same path). See spec §9.2.
+    local resolved_source
+    resolved_source="$(cd "$source" && pwd -P)"
+    if [ -d "$dest" ]; then
+        local resolved_dest
+        resolved_dest="$(cd "$dest" && pwd -P)"
+        if [ "$resolved_source" = "$resolved_dest" ]; then
+            log_warn "HERMES_INSTALL_USE_LOCAL_REPO source equals install dir ($resolved_source); skipping mirror"
+            return 0
+        fi
+    fi
+
+    # Handle existing $dest (mirrors the "not a git repo" handling).
+    if [ -d "$dest" ]; then
+        local backup_dir="${dest}.broken-$(date -u +%Y%m%d-%H%M%S)"
+        log_warn "Existing directory at $dest (dev install path); moving aside to $backup_dir"
+        if ! mv "$dest" "$backup_dir"; then
+            log_error "Could not move $dest aside"
+            return 1
+        fi
+    fi
+
+    # Ensure parent of $dest exists.
+    local parent
+    parent="$(dirname "$dest")"
+    [ -n "$parent" ] && [ ! -d "$parent" ] && mkdir -p "$parent"
+
+    # rsync mirror $source → $dest, excluding venv / node_modules / marker.
+    # -a         = archive mode (preserves perms, symlinks, mtimes)
+    # --delete   = remove files in $dest that aren't in $source
+    # --exclude  = skip venv, node_modules, bootstrap marker
+    # .git is INTENTIONALLY NOT excluded (D3: keep .git)
+    if ! rsync -a --delete \
+            --exclude='venv' \
+            --exclude='.venv' \
+            --exclude='node_modules' \
+            --exclude='.hermes-bootstrap-complete' \
+            "$source/" "$dest/"; then
+        log_error "rsync mirror of $source → $dest failed"
+        return 1
+    fi
+
+    log_success "Local repo mirrored from $source to $dest"
 }
 
 setup_venv() {
