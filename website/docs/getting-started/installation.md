@@ -155,3 +155,47 @@ For more diagnostics, run `hermes doctor` — it will tell you exactly what's mi
 ## Install method auto-detection
 
 Hermes auto-detects whether it was installed via `pip`, the git installer, Homebrew, or NixOS, and `hermes update` prints the matching update command for that path. There's no env var to set — the detection is based on the install layout (Python site-packages, `~/.hermes/hermes-agent/`, Homebrew prefix, or Nix store path). `hermes doctor` also surfaces the detected method under its environment summary.
+
+## Development mode — install from a local checkout
+
+When you've made local changes to `apps/desktop/` (or any other part of
+`hermes-agent`) and want the installer to pick them up, set
+`HERMES_INSTALL_USE_LOCAL_REPO` to the absolute path of your local
+checkout **before** running `install.ps1` / `install.sh`. The installer
+will skip the `git clone` step and mirror your local files into the
+install directory instead.
+
+### Windows (PowerShell)
+
+```powershell
+$env:HERMES_INSTALL_USE_LOCAL_REPO = 'C:\Users\you\code\hermes-agent'
+.\scripts\install.ps1 -IncludeDesktop
+```
+
+### macOS / Linux (bash)
+
+```bash
+export HERMES_INSTALL_USE_LOCAL_REPO="$HOME/code/hermes-agent"
+./scripts/install.sh --include-desktop
+```
+
+The variable is also picked up by `bootstrap-runner.cjs` inside
+`Hermes.exe`, so subsequent re-runs of the installer from the
+desktop's update flow will keep using your local checkout.
+
+### Caveats
+
+- The path must be an existing git checkout (it must contain a `.git/`
+  directory). If the path is missing or invalid the installer falls back
+  to the regular git-clone flow and prints a warning — it will not fail.
+- The mirror excludes `venv/`, `node_modules/`, and
+  `.hermes-bootstrap-complete/` from the source tree. If your local
+  checkout has cached Python or Node dependencies in those directories,
+  they will be reinstalled by the normal `uv sync` / `npm ci` stages.
+- The mirror uses `robocopy /MIR` (Windows) or `rsync --delete`
+  (Unix). Files in the install directory that are **not** present in
+  your local checkout will be deleted. Don't store local-only edits
+  inside the install directory — keep them in the checkout.
+- The `hermes update` flow re-runs the mirror step. If you want to
+  pin your install to a specific worktree branch, check out that
+  branch in the source checkout before running the installer.
