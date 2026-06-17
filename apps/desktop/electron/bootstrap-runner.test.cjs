@@ -136,3 +136,157 @@ test('resolveInstallScript rethrows when the 404 fallback is unavailable', async
     fs.rmSync(home, { recursive: true, force: true })
   }
 })
+
+test('spawnPowerShell forwards HERMES_INSTALL_USE_LOCAL_REPO from parent env', async () => {
+  // We need to test that the env var bubbles through. Since spawnPowerShell
+  // is internal, we test it via runBootstrap or via a small refactor: we
+  // import the internal helper if exported, else test via a mock.
+  //
+  // Strategy: use a one-shot module cache reset by re-requiring the file
+  // with a stubbed child_process.spawn that captures the env arg.
+
+  const { spawn } = require('node:child_process')
+  const originalSpawn = spawn
+  const captured = []
+  const fakeSpawn = (...args) => {
+    captured.push(args)
+    // Return a minimal EventEmitter-like child so the await doesn't hang
+    const { EventEmitter } = require('node:events')
+    const child = new EventEmitter()
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = () => {}
+    return child
+  }
+
+  // Simulate: parent process has HERMES_INSTALL_USE_LOCAL_REPO=/foo
+  const prevVal = process.env.HERMES_INSTALL_USE_LOCAL_REPO
+  process.env.HERMES_INSTALL_USE_LOCAL_REPO = '/foo/bar'
+
+  try {
+    require('node:child_process').spawn = fakeSpawn
+    // Force a fresh require of bootstrap-runner so the env override is read
+    delete require.cache[require.resolve('./bootstrap-runner.cjs')]
+    const fresh = require('./bootstrap-runner.cjs')
+
+    const home = mkTmpHome()
+    // runBootstrap opens a log file via openRunLog whose write stream keeps
+    // flushing after the promise resolves. If the log dir is inside `home`,
+    // `rmSync(home, ...)` will race with the stream and trigger an
+    // uncaughtException (ENOENT on the deleted log file). Put the log dir
+    // outside `home` so cleanup of the test sandbox can't collide with the
+    // stream's async flush. The log file leaks in os.tmpdir() — acceptable
+    // for a single-run test.
+    const logRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-bootstrap-log-'))
+    try {
+      // Trigger spawnPowerShell via a small script that wraps a stage
+      // invocation. We use the runBootstrap path, but it needs installStamp
+      // + sourceRepoRoot. The simplest test is to call the exported
+      // resolveInstallScript path with a local script and let it spawn.
+      const scriptsDir = path.join(home, 'hermes-agent', 'scripts')
+      fs.mkdirSync(scriptsDir, { recursive: true })
+      const scriptPath = path.join(scriptsDir, SCRIPT_NAME)
+      fs.writeFileSync(scriptPath, '#!/bin/sh\necho hi\n')
+
+      await fresh.runBootstrap({
+        installStamp: null,
+        activeRoot: home,
+        sourceRepoRoot: path.dirname(scriptsDir),
+        hermesHome: home,
+        logRoot,
+        onEvent: () => {}
+      }).catch(() => {})  // ignore errors from the fake spawn returning no data
+
+      // Find the spawn call that invoked our fake script
+      const powerShellCall = captured.find(args =>
+        args[1] && args[1].some && args[1].some(arg => arg && arg.includes && arg.includes(SCRIPT_NAME))
+      )
+      assert.ok(powerShellCall, 'spawn was called with the install script')
+      if (powerShellCall) {
+        const env = powerShellCall[2].env
+        assert.equal(
+          env.HERMES_INSTALL_USE_LOCAL_REPO,
+          '/foo/bar',
+          'parent HERMES_INSTALL_USE_LOCAL_REPO is forwarded to child env'
+        )
+      }
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  } finally {
+    require('node:child_process').spawn = originalSpawn
+    if (prevVal === undefined) {
+      delete process.env.HERMES_INSTALL_USE_LOCAL_REPO
+    } else {
+      process.env.HERMES_INSTALL_USE_LOCAL_REPO = prevVal
+    }
+  }
+})
+
+test('spawnPowerShell passes empty string for HERMES_INSTALL_USE_LOCAL_REPO when parent env unset', async () => {
+  const { spawn } = require('node:child_process')
+  const originalSpawn = spawn
+  const captured = []
+  const fakeSpawn = (...args) => {
+    captured.push(args)
+    const { EventEmitter } = require('node:events')
+    const child = new EventEmitter()
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = () => {}
+    return child
+  }
+
+  // Unset in parent
+  const prevVal = process.env.HERMES_INSTALL_USE_LOCAL_REPO
+  delete process.env.HERMES_INSTALL_USE_LOCAL_REPO
+
+  try {
+    require('node:child_process').spawn = fakeSpawn
+    delete require.cache[require.resolve('./bootstrap-runner.cjs')]
+    const fresh = require('./bootstrap-runner.cjs')
+
+    const home = mkTmpHome()
+    // runBootstrap opens a log file via openRunLog whose write stream keeps
+    // flushing after the promise resolves. If the log dir is inside `home`,
+    // `rmSync(home, ...)` will race with the stream and trigger an
+    // uncaughtException (ENOENT on the deleted log file). Put the log dir
+    // outside `home` so cleanup of the test sandbox can't collide with the
+    // stream's async flush. The log file leaks in os.tmpdir() — acceptable
+    // for a single-run test.
+    const logRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-bootstrap-log-'))
+    try {
+      const scriptsDir = path.join(home, 'hermes-agent', 'scripts')
+      fs.mkdirSync(scriptsDir, { recursive: true })
+      const scriptPath = path.join(scriptsDir, SCRIPT_NAME)
+      fs.writeFileSync(scriptPath, '#!/bin/sh\necho hi\n')
+
+      await fresh.runBootstrap({
+        installStamp: null,
+        activeRoot: home,
+        sourceRepoRoot: path.dirname(scriptsDir),
+        hermesHome: home,
+        logRoot,
+        onEvent: () => {}
+      }).catch(() => {})
+
+      const powerShellCall = captured.find(args =>
+        args[1] && args[1].some && args[1].some(arg => arg && arg.includes && arg.includes(SCRIPT_NAME))
+      )
+      assert.ok(powerShellCall, 'spawn was called with the install script')
+      if (powerShellCall) {
+        const env = powerShellCall[2].env
+        assert.equal(
+          env.HERMES_INSTALL_USE_LOCAL_REPO,
+          '',
+          'child env has empty string HERMES_INSTALL_USE_LOCAL_REPO when parent unset'
+        )
+      }
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  } finally {
+    require('node:child_process').spawn = originalSpawn
+    if (prevVal !== undefined) process.env.HERMES_INSTALL_USE_LOCAL_REPO = prevVal
+  }
+})

@@ -299,7 +299,12 @@ function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, herme
         ...process.env,
         // Pass HERMES_HOME through so install.ps1 respects the caller's
         // choice rather than re-computing the default.
-        HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
+        HERMES_HOME: hermesHome || process.env.HERMES_HOME || '',
+        // F1: forward the dev-local-repo shortcut. When the parent process
+        // (dev shell, CI wrapper, Electron parent) sets this, install.ps1
+        // inside the child will skip git clone and use the local checkout.
+        // Empty string when unset, so PowerShell always sees a defined var.
+        HERMES_INSTALL_USE_LOCAL_REPO: process.env.HERMES_INSTALL_USE_LOCAL_REPO || ''
       }
     }))
 
@@ -372,7 +377,12 @@ function spawnBash(scriptPath, args, { emit, stageName, abortSignal, hermesHome 
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
+        HERMES_HOME: hermesHome || process.env.HERMES_HOME || '',
+        // F1: forward the dev-local-repo shortcut so install.sh inside the
+        // child process knows to skip git clone and use the developer's
+        // local checkout. Empty string when unset so the install script
+        // always sees a defined var.
+        HERMES_INSTALL_USE_LOCAL_REPO: process.env.HERMES_INSTALL_USE_LOCAL_REPO || ''
       }
     })
 
