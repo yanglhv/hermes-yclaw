@@ -140,6 +140,16 @@ try {
     git config user.email "test@local" 2>$null
     git config user.name "test" 2>$null
     "hello from local" | Out-File -Encoding utf8 -FilePath "marker.txt"
+    # Create venv/, node_modules/, etc. in source so the exclude set is actually exercised
+    New-Item -ItemType Directory -Force -Path (Join-Path $sourceDir "venv") | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $sourceDir ".venv") | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $sourceDir "node_modules") | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $sourceDir ".hermes-bootstrap-complete") | Out-Null
+    "should be excluded" | Out-File -Encoding utf8 -FilePath (Join-Path $sourceDir "venv/lib.py")
+    "should be excluded" | Out-File -Encoding utf8 -FilePath (Join-Path $sourceDir ".venv/lib.py")
+    "should be excluded" | Out-File -Encoding utf8 -FilePath (Join-Path $sourceDir "node_modules/package.json")
+    "should be excluded" | Out-File -Encoding utf8 -FilePath (Join-Path $sourceDir ".hermes-bootstrap-complete/marker")
+    "required" | Out-File -Encoding utf8 -FilePath (Join-Path $sourceDir "required-file.txt")
     git add -A 2>$null
     git commit -q -m "init" 2>$null
 } finally {
@@ -179,6 +189,12 @@ Assert-True (Test-Path -LiteralPath (Join-Path $installDir ".git")) -Label "F1: 
 
 # 6. Assert: venv was NOT mirrored
 Assert-True (-not (Test-Path -LiteralPath (Join-Path $installDir "venv"))) -Label "F1: venv excluded from mirror"
+Assert-True (-not (Test-Path -LiteralPath (Join-Path $installDir ".venv"))) -Label "F1: .venv excluded from mirror"
+Assert-True (-not (Test-Path -LiteralPath (Join-Path $installDir "node_modules"))) -Label "F1: node_modules excluded from mirror"
+Assert-True (-not (Test-Path -LiteralPath (Join-Path $installDir ".hermes-bootstrap-complete"))) -Label "F1: .hermes-bootstrap-complete excluded from mirror"
+
+# 7. Assert: a non-excluded file IS mirrored (positive control)
+Assert-True (Test-Path -LiteralPath (Join-Path $installDir "required-file.txt")) -Label "F1: non-excluded file mirrored (positive control)"
 
 # Cleanup
 Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue

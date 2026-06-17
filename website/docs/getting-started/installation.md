@@ -188,7 +188,7 @@ desktop's update flow will keep using your local checkout.
 - The path must be an existing git checkout (it must contain a `.git/`
   directory). If the path is missing or invalid the installer falls back
   to the regular git-clone flow and prints a warning — it will not fail.
-- The mirror excludes `venv/`, `node_modules/`, and
+- The mirror excludes `venv/`, `.venv/`, `node_modules/`, and
   `.hermes-bootstrap-complete/` from the source tree. If your local
   checkout has cached Python or Node dependencies in those directories,
   they will be reinstalled by the normal `uv sync` / `npm ci` stages.

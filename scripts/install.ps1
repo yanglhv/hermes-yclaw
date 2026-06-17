@@ -1109,7 +1109,6 @@ function Install-Repository {
         if ($localRepo -and (Test-Path -LiteralPath $localRepo) -and (Test-Path -LiteralPath (Join-Path $localRepo '.git'))) {
             Write-Info "Using local repo at $localRepo (HERMES_INSTALL_USE_LOCAL_REPO); skipping git clone"
             Sync-LocalRepoToInstallDir -Source $localRepo -Dest $InstallDir
-            $script:_UsedLocalRepo = $true
             return
         } else {
             Write-Warn "HERMES_INSTALL_USE_LOCAL_REPO=$localRepo is not a valid git checkout; falling back to git clone"

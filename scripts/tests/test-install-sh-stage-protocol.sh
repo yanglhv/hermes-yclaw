@@ -90,6 +90,14 @@ else
     log_success() { echo "OK: $1"; }
     log_info() { echo "INFO: $1"; }
 
+    # Create venv/, node_modules/, and .hermes-bootstrap-complete/ in source
+    # so the exclude set is actually exercised
+    mkdir -p "$source_dir/venv" "$source_dir/.venv" "$source_dir/node_modules" "$source_dir/.hermes-bootstrap-complete"
+    echo "should be excluded" > "$source_dir/venv/lib.py"
+    echo "should be excluded" > "$source_dir/.venv/lib.py"
+    echo "should be excluded" > "$source_dir/node_modules/package.json"
+    echo "should be excluded" > "$source_dir/.hermes-bootstrap-complete/marker"
+
     # Run the sync function
     _sync_local_repo_to_install_dir "$source_dir" "$install_dir"
 
@@ -100,6 +108,9 @@ else
     fi
     assert_path "$install_dir/.git" "exists" "F1: .git preserved in install dir"
     assert_path "$install_dir/venv" "absent" "F1: venv excluded from mirror"
+    assert_path "$install_dir/.venv" "absent" "F1: .venv excluded from mirror"
+    assert_path "$install_dir/node_modules" "absent" "F1: node_modules excluded from mirror"
+    assert_path "$install_dir/.hermes-bootstrap-complete" "absent" "F1: .hermes-bootstrap-complete excluded from mirror"
 fi
 
 # -----------------------------------------------------------------------------
