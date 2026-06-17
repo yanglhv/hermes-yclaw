@@ -30,87 +30,121 @@ launcher proceeds to launch the default app without any update check.
 
 ### Requirement: Update check
 
-The system SHALL, when the network probe succeeds, fetch the catalog
-and compare each installed app's `installed_commit` against the
-catalog's latest commit for that app. Apps whose latest commit
-differs from the installed commit are added to a `pending` list.
+The `check_for_updates` Tauri command SHALL, when invoked, resolve the
+`RepoRef`, perform the network probe, and on success fetch the catalog via
+`launcher::catalog`. For each app recorded in `state.installed`, it SHALL
+compare `installed.installed_commit` against the catalog entry's latest
+commit. Apps whose latest commit differs are upserted into
+`state.pending_updates[id]` with `status = Avail` (preserving any existing
+`ready`/`downloading` entry — an already-ready update is NOT downgraded to
+`avail`). The command returns the list of app ids whose commit differs.
+When the probe fails or the catalog fetch errors, the command returns the
+current pending ids unchanged and logs a warning (no crash, no empty-out).
+
+Rationale: the prior implementation returned `pending_updates.keys()`
+without any catalog comparison, so updates were never actually detected.
 
 #### Scenario: Newer commit found
 
-- **Given** state has `installed.hermes.installed_commit = "abc123"`
-  and the catalog reports Hermes latest commit `"def456"`
+- **Given** `state.installed.hermes.installed_commit = "abc123"` and the
+  catalog reports Hermes latest commit `"def456"`
 - **When** `check_for_updates()` is called
-- **Then** the returned `UpdateSummary.updates_available` contains
-  `"hermes"`.
+- **Then** `state.pending_updates["hermes"].status = "avail"` and the
+  returned list contains `"hermes"`.
 
 #### Scenario: No newer commit
 
-- **Given** state has `installed.hermes.installed_commit = "abc123"`
-  and the catalog reports Hermes latest commit `"abc123"`
+- **Given** `state.installed.hermes.installed_commit = "abc123"` and the
+  catalog reports the same commit `"abc123"`
 - **When** `check_for_updates()` is called
-- **Then** the returned `UpdateSummary.updates_available` does NOT
-  contain `"hermes"`.
+- **Then** `"hermes"` is NOT added to `pending_updates` and is absent from
+  the returned list.
+
+#### Scenario: Offline leaves pending set intact
+
+- **Given** the network probe fails
+- **When** `check_for_updates()` is called
+- **Then** no crash occurs, a warning is logged, and the existing
+  `pending_updates` entries are returned unchanged.
 
 ### Requirement: Background pre-download
 
-The system SHALL, for each app in `pending`, run
-`install_script::resolve()` and write the resulting script to the
-bootstrap cache without invoking the install. The download runs in a
-background `tokio::spawn` task so it does not block the launch. The
-launch proceeds to launch the default app immediately after the spawn
-returns.
+The `pre_download_update(id)` Tauri command SHALL resolve the app's install
+script via `install_script::resolve(RepoRef, script_path)`, write the
+downloaded bytes to `$HERMES_HOME/bootstrap-cache/install-<sanitized_ref>.<ext>`
+(creating the directory if absent), and on success set
+`state.pending_updates[id]` to `status = Ready` with `downloaded_script`
+populated and `downloaded_at` set to now. On failure it SHALL set
+`status = Failed` with `last_error`/`last_error_at` populated. The download
+runs inside a `tokio::spawn` background task; the command returns immediately
+after spawning (the launcher launch path is never blocked by it).
 
-#### Scenario: Pre-download does not block launch
+Rationale: the prior implementation built a throwaway in-memory state and
+never wrote a cached script, so `status` never reached `ready`.
 
-- **Given** Hermes has a pending update and the script is not cached
-- **When** the launcher runs `run_silent_default()`
-- **Then** the call to `launch_app_silent` happens BEFORE the
-  download completes; the download runs to completion in the
-  background after the installer process exits.
+#### Scenario: Successful pre-download writes cache and sets ready
 
-#### Scenario: Successful pre-download updates state
+- **Given** Hermes has a pending (`avail`) update and no cached script
+- **When** `pre_download_update("hermes")` is spawned
+- **Then** on completion the script exists at the cache path and
+  `state.pending_updates["hermes"].status = "ready"` with
+  `downloaded_script` set.
 
-- **Given** Hermes has a pending update and the script downloads
-  successfully to `$HERMES_HOME/bootstrap-cache/install-def456.ps1`
-- **When** the download task completes
-- **Then** `state.pending_updates["hermes"].status` is set to
-  `"ready"`, `downloaded_script` is set to the cache path, and
-  `state.last_update_check_at` is updated to the current time.
+#### Scenario: Failed pre-download sets failed, no crash
 
-#### Scenario: Failed pre-download does not block launch
+- **Given** Hermes has a pending update but `install_script::resolve` fails
+  (HTTP error / timeout)
+- **When** the spawned task completes
+- **Then** `state.pending_updates["hermes"].status = "failed"` with
+  `last_error` populated; no panic.
 
-- **Given** Hermes has a pending update but the download fails (HTTP
-  error, timeout, etc.)
-- **When** the download task completes
-- **Then** the failure is logged and `state.pending_updates["hermes"]`
-  is set to `status="failed"` with `last_error` populated; the
-  default app launch has already happened; the next launcher launch
-  re-attempts.
+#### Scenario: Pre-download does not block the caller
+
+- **Given** `pre_download_update("hermes")` is invoked
+- **Then** the Tauri command returns before the download completes; the
+  download finishes in the background task.
 
 ### Requirement: Apply pending update
 
-The system SHALL, on user request, take the cached install script for
-an app and run the full parameterized bootstrap flow against it. The
-apply command `apply_pending_update(app_id)` is equivalent to
-`start_bootstrap(app_id, args)` but uses the cached script as its
-source (no fresh fetch) and runs the install end-to-end.
+The `apply_pending_update(id)` Tauri command SHALL take the cached script at
+`state.pending_updates[id].downloaded_script` (which MUST exist and be
+`status = Ready`; otherwise return `Err`) and run it through the existing
+parameterized bootstrap worker — the same path used by `start_bootstrap` —
+emitting `manifest`/`stage`/`log`/`complete`/`failed` events on the
+`bootstrap` channel tagged with `app_id = id`. On `complete`, it SHALL
+update `state.installed[id]` (commit/ref/`installed_at = now` /
+`installed_via = "update"`) and remove `state.pending_updates[id]`. On
+`failed`, the cached script and the pending entry are left intact so the
+user can retry. This command does NOT depend on a (still absent)
+`app_id`-parameterized `start_bootstrap`; it drives `bootstrap::run_bootstrap`
+directly with the `AppDescriptor` and the cached script path.
 
-#### Scenario: Cached script is used
+Rationale: the prior implementation resolved the cached script and then
+logged `"deferred to M6"` without running anything, leaving the UI on a
+stuck progress screen.
 
-- **Given** Hermes has `pending_updates["hermes"].status = "ready"`
-  with `downloaded_script = ".../install-def456.ps1"`
-- **When** the user clicks "Install now" in the Home screen banner
-- **Then** the launcher runs the full bootstrap flow using the cached
-  script, emits the standard manifest/stage/log events, and updates
-  `state.installed["hermes"]` on success.
+#### Scenario: Cached script runs end-to-end and updates state
+
+- **Given** `state.pending_updates["hermes"].status = "ready"` with a valid
+  `downloaded_script`
+- **When** the user clicks "Install now"
+- **Then** the bootstrap runs using the cached script, emits the standard
+  events, and on success `state.installed["hermes"]` is updated and
+  `state.pending_updates["hermes"]` is removed.
+
+#### Scenario: No ready cache is an error
+
+- **Given** no `ready` pending update for `"hermes"` (missing entry, or
+  `status != "ready"`, or script file absent)
+- **When** `apply_pending_update("hermes")` is invoked
+- **Then** it returns `Err` describing the missing cache; no bootstrap runs.
 
 #### Scenario: Apply failure leaves pending entry intact
 
-- **Given** Hermes has `pending_updates["hermes"].status = "ready"`
-- **When** the user clicks "Install now" but the install fails at the
-  `venv` stage
-- **Then** the cached script remains; `pending_updates["hermes"]` is
-  unchanged; the failure screen shows the retry button.
+- **Given** a `ready` pending update whose install fails at the `venv` stage
+- **When** the bootstrap emits `failed`
+- **Then** the cached script remains, `pending_updates["hermes"]` is
+  unchanged, and the failure screen offers retry.
 
 ### Requirement: Pending-update cache validation
 
