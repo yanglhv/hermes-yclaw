@@ -122,6 +122,101 @@ if ($errFrame) {
 }
 
 # -----------------------------------------------------------------------------
+# Test: HERMES_INSTALL_USE_LOCAL_REPO bypasses git clone
+# -----------------------------------------------------------------------------
+Write-Host ""
+Write-Host "-- HERMES_INSTALL_USE_LOCAL_REPO --"
+
+# 1. Create a temp git repo (the local "source")
+$tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) "hermes-f1-test-$([System.Guid]::NewGuid().ToString('N'))"
+$sourceDir = Join-Path $tmpRoot "source"
+$installDir = Join-Path $tmpRoot "install"
+New-Item -ItemType Directory -Force -Path $sourceDir | Out-Null
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+
+Push-Location $sourceDir
+try {
+    git init -q 2>$null
+    git config user.email "test@local" 2>$null
+    git config user.name "test" 2>$null
+    "hello from local" | Out-File -Encoding utf8 -FilePath "marker.txt"
+    git add -A 2>$null
+    git commit -q -m "init" 2>$null
+} finally {
+    Pop-Location
+}
+
+# 2. Run install.ps1 with HERMES_INSTALL_USE_LOCAL_REPO set, target Stage-Repository
+$env:HERMES_INSTALL_USE_LOCAL_REPO = $sourceDir
+$env:HERMES_HOME = $tmpRoot
+# override default install dir by setting -InstallDir
+try {
+    $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $installScript -Stage Stage-Repository -Json -InstallDir $installDir -NoVenv -SkipSetup 2>&1
+} finally {
+    Remove-Item Env:HERMES_INSTALL_USE_LOCAL_REPO -ErrorAction SilentlyContinue
+    Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue
+}
+
+# 3. Assert: the JSON frame reports ok=true
+$lastLine = ($output | Where-Object { $_ -match '^\{' } | Select-Object -Last 1)
+$frame = $null
+try { $frame = $lastLine | ConvertFrom-Json } catch {}
+Assert-True ($null -ne $frame) -Label "F1: stage emits parseable JSON frame"
+if ($frame) {
+    Assert-True ($frame.ok -eq $true) -Label "F1: stage ok=true (got: $($frame | ConvertTo-Json -Compress))"
+}
+
+# 4. Assert: marker file was mirrored to install dir
+$mirrored = Join-Path $installDir "marker.txt"
+Assert-True (Test-Path -LiteralPath $mirrored) -Label "F1: marker file mirrored to install dir"
+if (Test-Path -LiteralPath $mirrored) {
+    $content = Get-Content -LiteralPath $mirrored -Raw
+    Assert-Equal -Expected "hello from local" -Actual $content.Trim() -Label "F1: marker file content preserved"
+}
+
+# 5. Assert: .git was preserved in install dir
+Assert-True (Test-Path -LiteralPath (Join-Path $installDir ".git")) -Label "F1: .git preserved in install dir"
+
+# 6. Assert: venv was NOT mirrored
+Assert-True (-not (Test-Path -LiteralPath (Join-Path $installDir "venv"))) -Label "F1: venv excluded from mirror"
+
+# Cleanup
+Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+# -----------------------------------------------------------------------------
+# Test: invalid path falls back to git clone (warning, not failure)
+# -----------------------------------------------------------------------------
+Write-Host ""
+Write-Host "-- HERMES_INSTALL_USE_LOCAL_REPO invalid path --"
+
+$tmpRoot2 = Join-Path ([System.IO.Path]::GetTempPath()) "hermes-f1-test2-$([System.Guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Force -Path $tmpRoot2 | Out-Null
+$bogus = Join-Path $tmpRoot2 "not-a-repo"
+New-Item -ItemType Directory -Force -Path $bogus | Out-Null  # exists but no .git
+
+$env:HERMES_INSTALL_USE_LOCAL_REPO = $bogus
+$env:HERMES_HOME = $tmpRoot2
+$installDir2 = Join-Path $tmpRoot2 "install"
+try {
+    # We do NOT run a real git clone (no network in unit tests) — we just check
+    # the warning is emitted. Use -Manifest (no stages run) is not enough since
+    # the warning is in Install-Repository. So we run a stage that would emit
+    # the warn before attempting the clone. In our impl, the warn goes to
+    # stderr-ish Write-Warn output (mixed with stdout). Use 2>&1 to capture all.
+    #
+    # Expectation: the stage will FAIL (no network → git clone fails) but the
+    # warning text MUST appear in the captured output. So we check output
+    # contains the warning, not that ok=true.
+    $output2 = & powershell -NoProfile -ExecutionPolicy Bypass -File $installScript -Stage Stage-Repository -Json -InstallDir $installDir2 -NoVenv -SkipSetup 2>&1
+    $warned = ($output2 -join "`n") -match "falling back to git clone"
+    Assert-True $warned -Label "F1: invalid path emits 'falling back to git clone' warning"
+} finally {
+    Remove-Item Env:HERMES_INSTALL_USE_LOCAL_REPO -ErrorAction SilentlyContinue
+    Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tmpRoot2 -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 Write-Host ""

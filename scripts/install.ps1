@@ -1099,6 +1099,24 @@ function Install-SystemPackages {
 function Install-Repository {
     Write-Info "Installing to $InstallDir..."
 
+    # ── F1 dev shortcut: HERMES_INSTALL_USE_LOCAL_REPO ──
+    # Lets a developer point the installer at a local checkout (typically a
+    # git worktree) so their uncommitted / unpushed edits in apps/desktop are
+    # used by the build instead of the upstream main HEAD. See spec §5.
+    $localRepo = $env:HERMES_INSTALL_USE_LOCAL_REPO
+    if ($localRepo) {
+        $localRepo = $localRepo.Trim()
+        if ($localRepo -and (Test-Path -LiteralPath $localRepo) -and (Test-Path -LiteralPath (Join-Path $localRepo '.git'))) {
+            Write-Info "Using local repo at $localRepo (HERMES_INSTALL_USE_LOCAL_REPO); skipping git clone"
+            Sync-LocalRepoToInstallDir -Source $localRepo -Dest $InstallDir
+            $script:_UsedLocalRepo = $true
+            return
+        } else {
+            Write-Warn "HERMES_INSTALL_USE_LOCAL_REPO=$localRepo is not a valid git checkout; falling back to git clone"
+        }
+    }
+    # ── end F1 dev shortcut ──
+
     $didUpdate = $false
 
     if (Test-Path $InstallDir) {
@@ -1885,6 +1903,69 @@ Delete the contents (or this file) to use the default personality.
             }
         }
     }
+}
+
+function Sync-LocalRepoToInstallDir {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Dest
+    )
+
+    # Guard against Source == Dest (would be a no-op mirror, but robocopy /MIR
+    # can produce undefined behaviour when source and dest resolve to the same
+    # inode). See spec §9.2.
+    $resolvedSource = (Resolve-Path -LiteralPath $Source).ProviderPath
+    if (Test-Path -LiteralPath $Dest) {
+        $resolvedDest = (Resolve-Path -LiteralPath $Dest).ProviderPath
+        if ($resolvedSource -eq $resolvedDest) {
+            Write-Warn "HERMES_INSTALL_USE_LOCAL_REPO source equals install dir ($resolvedSource); skipping mirror"
+            return
+        }
+    }
+
+    # Handle existing $Dest (mirrors line 1278-1288 "not a git repo" handling).
+    if (Test-Path -LiteralPath $Dest) {
+        $backupDir = "$Dest.broken-" + (Get-Date -Format 'yyyyMMdd-HHmmss')
+        Write-Warn "Existing directory at $Dest (dev install path); moving aside to $backupDir"
+        try {
+            Move-Item -LiteralPath $Dest -Destination $backupDir -ErrorAction Stop
+        } catch {
+            Write-Err "Could not move $Dest aside: $_"
+            throw
+        }
+    }
+
+    # Ensure parent of $Dest exists.
+    $parent = Split-Path -Parent $Dest
+    if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    }
+
+    # Mirror $Source → $Dest with venv / node_modules / marker excluded.
+    # /MIR = mirror (overwrite + delete extra files in $Dest).
+    # /XD  = exclude directories. .git is INTENTIONALLY NOT in this list (D3:
+    #        keep .git so the dev user can inspect history and `hermes update`
+    #        still works in the install path).
+    # /NFL /NDL /NJH /NJS /NP = quiet output.
+    # /R:0 /W:0 = don't retry on transient errors.
+    $robocopyArgs = @(
+        $Source
+        $Dest
+        '/MIR'
+        '/XD', 'venv', '.venv', 'node_modules', '.hermes-bootstrap-complete'
+        '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+        '/R:0', '/W:0'
+    )
+    # robocopy exit codes: 0-7 = success, 8+ = error. We use /MIR which can return
+    # 1 ("files copied") and 3 ("extra files deleted") — both fine for us.
+    $rc = 0
+    & robocopy @robocopyArgs | ForEach-Object { "$_" }
+    $rc = $LASTEXITCODE
+    if ($rc -ge 8) {
+        throw "robocopy mirror of $Source → $Dest failed (exit $rc)"
+    }
+
+    Write-Success "Local repo mirrored from $Source to $Dest"
 }
 
 function Install-NodeDeps {
