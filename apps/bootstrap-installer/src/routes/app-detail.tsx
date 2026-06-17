@@ -51,11 +51,11 @@ export function AppDetail({ app, onAction, onBack }: AppDetailProps) {
         setShowUninstallConfirm(true);
         break;
       case "uninstall-light":
-        void uninstallApp(app.descriptor.id, "user");
+        void uninstallApp(app.descriptor.id, "light");
         setShowUninstallConfirm(false);
         break;
       case "uninstall-full":
-        void uninstallApp(app.descriptor.id, "machine");
+        void uninstallApp(app.descriptor.id, "full");
         setShowUninstallConfirm(false);
         break;
       case "settings":
@@ -85,11 +85,16 @@ export function AppDetail({ app, onAction, onBack }: AppDetailProps) {
         <div className="app-detail__icon">{iconLetter}</div>
         <h1 className="app-detail__name">{descriptor.display_name}</h1>
         <p className="app-detail__version">
-          {installed ? `Version ${installed.version}` : "Not installed"}
+          {installed ? `Version ${descriptor.version}` : "Not installed"}
         </p>
-        {installed?.last_updated && (
+        {installed && (
           <p className="app-detail__last-updated">
-            Last updated: {new Date(installed.last_updated).toLocaleDateString()}
+            {installed.installed_ref_name} @ {installed.installed_commit.slice(0, 7)} · via {installed.installed_via}
+          </p>
+        )}
+        {installed && (
+          <p className="app-detail__install-root" title={installed.install_root}>
+            {installed.install_root}
           </p>
         )}
       </div>

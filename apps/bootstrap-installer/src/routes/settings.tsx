@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useStore } from "@nanostores/react";
-import { $hermesHome, $launcherConfig, loadLauncherConfig, saveLauncherConfig, type LauncherConfig } from "../store";
+import { $hermesHome, $launcherConfig, $route, loadLauncherConfig, saveLauncherConfig, type LauncherConfig } from "../store";
 
 interface FormState {
   preferred_channel: string;
@@ -103,6 +103,9 @@ export default function Settings() {
   return (
     <main className="settings" data-testid="settings">
       <header className="settings__header">
+        <button className="back-button" onClick={() => $route.set("home")} aria-label="Back to home">
+          ← Home
+        </button>
         <h1>Settings</h1>
       </header>
 

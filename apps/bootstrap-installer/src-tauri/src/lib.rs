@@ -134,7 +134,7 @@ pub fn run() {
             let launch_target = launch_args_from_args(args.iter().map(String::as_str));
             let settings_requested = args.iter().any(|a| a == "--settings");
 
-            let state: tauri::State<std::sync::Arc<launcher::commands::LauncherStateHandle>> =
+            let state: tauri::State<launcher::commands::LauncherStateHandle> =
                 app.state();
             let launcher_state = state.0.lock().unwrap().clone();
             let kind = launcher::silent::classify_launch_state(
@@ -193,8 +193,14 @@ pub fn run() {
             }
 
             // macOS fast path: double-click on Hermes.app launches installed app
-            // without showing the installer window.
-            if cfg!(target_os = "macos") && mode == AppMode::Install && !force_setup {
+            // without showing the installer window. Sub-case of "silent default"
+            // (per launcher-cli-modes spec) — must not override an explicit
+            // `--settings` request, which the spec routes to the full Home UI.
+            if cfg!(target_os = "macos")
+                && mode == AppMode::Install
+                && !force_setup
+                && !settings_requested
+            {
                 let install_root = paths::hermes_home().join("hermes-agent");
                 if bootstrap::hermes_is_installed(&install_root) {
                     match bootstrap::spawn_installed_desktop(&install_root) {
@@ -231,6 +237,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Mode (install vs update)
             get_mode,
+            launcher::commands::get_launch_mode,
             // Bootstrap lifecycle
             bootstrap::start_bootstrap,
             bootstrap::cancel_bootstrap,
@@ -256,6 +263,11 @@ pub fn run() {
             launcher::commands::check_for_updates,
             launcher::commands::pre_download_update,
             launcher::commands::apply_pending_update,
+            // Per-app lifecycle (launch / uninstall / repair / open settings)
+            launcher::commands::launch_app,
+            launcher::commands::uninstall_app,
+            launcher::commands::repair_app,
+            launcher::commands::open_app_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Hermes Setup");

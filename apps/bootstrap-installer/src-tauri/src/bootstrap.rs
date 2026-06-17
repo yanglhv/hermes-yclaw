@@ -126,6 +126,112 @@ pub async fn start_bootstrap(
     Ok(())
 }
 
+/// Shared install driver for `apply_pending_update` and `repair_app`. Runs the
+/// parameterized bootstrap — the SAME worker `start_bootstrap` uses, guarded
+/// by the SAME `AppState` mutex so the three can never run concurrently — and,
+/// on success, updates `LauncherState.installed[id]` (commit/ref/timestamp/
+/// `installed_via`) and clears any `pending_updates[id]`. On failure the
+/// launcher state is left unchanged so the UI failure screen can retry.
+///
+/// `record_commit` / `record_ref` are the values to stamp into `installed[id]`
+/// on success (apply passes the pending update's HEAD; repair passes the repo
+/// ref's HEAD). The bootstrap events are emitted with `app_id: None`; the
+/// frontend routes them via `$currentAppId`, which apply/repair set first.
+pub async fn run_app_install(
+    app: AppHandle,
+    app_state: State<'_, Arc<AppState>>,
+    descriptor: crate::app::AppDescriptor,
+    args: StartBootstrapArgs,
+    id: String,
+    via: String,
+    record_commit: String,
+    record_ref: String,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    let mut guard = app_state.bootstrap.lock().await;
+    if let Some(h) = guard.as_ref() {
+        if h.status.running {
+            return Err("Bootstrap is already running".into());
+        }
+    }
+    let (cancel_tx, cancel_rx) = mpsc::channel::<()>(1);
+    let handle = BootstrapHandle {
+        cancel_tx,
+        started_at: Instant::now(),
+        status: BootstrapStatus {
+            running: true,
+            completed: false,
+            install_root: None,
+            last_error: None,
+        },
+    };
+    *guard = Some(handle);
+    drop(guard);
+
+    let app_for_task = app.clone();
+    let state_for_task = app_state.inner().clone();
+    let cancel_rx = Arc::new(Mutex::new(Some(cancel_rx)));
+
+    tokio::spawn(async move {
+        let result = run_bootstrap(&descriptor, app_for_task.clone(), args, cancel_rx).await;
+
+        // Reflect terminal state into AppState (mirrors start_bootstrap).
+        let mut bg = state_for_task.bootstrap.lock().await;
+        if let Some(h) = bg.as_mut() {
+            h.status.running = false;
+            match &result {
+                Ok(install_root) => {
+                    h.status.completed = true;
+                    h.status.install_root = Some(install_root.clone());
+                    h.status.last_error = None;
+                }
+                Err(err) => {
+                    h.status.completed = false;
+                    h.status.last_error = Some(err.to_string());
+                }
+            }
+        }
+        drop(bg);
+
+        // On success, record the install in the launcher registry and clear
+        // any pending update so the tile reflects the new state.
+        if result.is_ok() {
+            let lh = app_for_task.state::<crate::launcher::commands::LauncherStateHandle>();
+            let mut s = lh.0.lock().unwrap();
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let root = s
+                .installed
+                .get(&id)
+                .map(|i| i.install_root.clone())
+                .unwrap_or_else(|| {
+                    crate::paths::hermes_home()
+                        .join(&descriptor.install_root)
+                        .to_string_lossy()
+                        .into_owned()
+                });
+            s.installed.insert(
+                id.clone(),
+                crate::app::InstalledApp {
+                    install_root: root,
+                    installed_commit: record_commit.clone(),
+                    installed_ref_type: "branch".into(),
+                    installed_ref_name: record_ref.clone(),
+                    installed_at: format!("{now_secs}Z"),
+                    installed_via: via.clone(),
+                },
+            );
+            s.pending_updates.remove(&id);
+            let _ = crate::launcher::state::save_launcher_state(&s);
+        }
+    });
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn cancel_bootstrap(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let guard = state.bootstrap.lock().await;

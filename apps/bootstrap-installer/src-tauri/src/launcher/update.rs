@@ -74,6 +74,29 @@ pub mod update {
         }
     }
 
+    /// Fetch the HEAD commit SHA of `repo.ref_name` via the GitHub commits API.
+    /// Used by `check_for_updates` as the authoritative "latest commit" for an
+    /// app (each registered app IS its repo). 2s timeout; any non-2xx or
+    /// network error → `Err`.
+    pub async fn fetch_head_sha(api_base: &str, repo: &RepoRef) -> Result<String, UpdateError> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()?;
+        let url = format!(
+            "{}/repos/{}/{}/commits/{}",
+            api_base, repo.owner, repo.name, repo.ref_name
+        );
+        let resp = client.get(&url).send().await?.error_for_status()?;
+        let body = resp.text().await?;
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            sha: String,
+        }
+        let r: Resp =
+            serde_json::from_str(&body).map_err(|e| UpdateError::ParseError(e.to_string()))?;
+        Ok(r.sha)
+    }
+
     fn sanitize(s: &str) -> String {
         s.chars().take(40).map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
     }
@@ -116,6 +139,27 @@ pub mod update {
             let _ = super::pre_download_update_to(&app, &repo, "def456", dir.path(), &mut state).await;
             let p = state.pending_updates.get("hermes").expect("pending");
             assert_eq!(p.status, PendingStatus::Failed);
+        }
+
+        #[tokio::test]
+        async fn fetch_head_sha_returns_sha_on_success() {
+            let mut server = mockito::Server::new_async().await;
+            let _m = server.mock("GET", "/repos/o/n/commits/main")
+                .with_status(200)
+                .with_body(r#"{"sha":"def4567890abcdef","commit":{"message":"x"}}"#)
+                .create_async().await;
+            let repo = RepoRef { owner: "o".into(), name: "n".into(), ref_name: "main".into() };
+            let sha = super::fetch_head_sha(&server.url(), &repo).await.unwrap();
+            assert_eq!(sha, "def4567890abcdef");
+        }
+
+        #[tokio::test]
+        async fn fetch_head_sha_errors_on_non_2xx() {
+            let mut server = mockito::Server::new_async().await;
+            let _m = server.mock("GET", "/repos/o/n/commits/main")
+                .with_status(500).create_async().await;
+            let repo = RepoRef { owner: "o".into(), name: "n".into(), ref_name: "main".into() };
+            assert!(super::fetch_head_sha(&server.url(), &repo).await.is_err());
         }
     }
 }

@@ -26,13 +26,23 @@ export function AppTile({ app, onAction }: { app: LaunchableApp; onAction: (acti
       {app.installed && app.installed.installed_commit && (
         <small>{app.installed.installed_ref_name} @ {app.installed.installed_commit.slice(0, 7)}</small>
       )}
-      <button disabled={primary.disabled} onClick={() => onAction(primary.label.toLowerCase())}>{primary.label}</button>
+      <button
+        disabled={primary.disabled}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAction(primary.label.toLowerCase());
+        }}
+      >
+        {primary.label}
+      </button>
       <details className="app-tile__menu">
         <summary>⋯</summary>
-        <button onClick={() => onAction("repair")}>Repair</button>
-        <button onClick={() => onAction("uninstall")}>Uninstall</button>
-        {app.descriptor.app_settings_url && <button onClick={() => onAction("settings")}>Open app settings</button>}
-        <button onClick={() => onAction("details")}>View details</button>
+        <button onClick={(e) => { e.stopPropagation(); onAction("repair"); }}>Repair</button>
+        <button onClick={(e) => { e.stopPropagation(); onAction("uninstall"); }}>Uninstall</button>
+        {app.descriptor.app_settings_url && (
+          <button onClick={(e) => { e.stopPropagation(); onAction("settings"); }}>Open app settings</button>
+        )}
+        <button onClick={(e) => { e.stopPropagation(); onAction("details"); }}>View details</button>
       </details>
     </article>
   );

@@ -135,6 +135,28 @@ pub struct PendingUpdate {
 #[serde(rename_all = "lowercase")]
 pub enum PendingStatus { Avail, Downloading, Ready, Failed }
 
+/// Semantic-version less-than: true when `a < b` comparing `major.minor.patch`
+/// numerically (NOT lexicographically). Any parse failure — non-numeric
+/// segment, a 4th segment, or a pre-release suffix — returns `false`. The safe
+/// default for gating: a malformed `min_launcher_version` never disables an
+/// install, and pre-release launchers/versions fall back to "not too old".
+pub fn semver_lt(a: &str, b: &str) -> bool {
+    fn parse(s: &str) -> Option<(u64, u64, u64)> {
+        let mut it = s.split('.');
+        let maj = it.next()?.parse().ok()?;
+        let min = it.next()?.parse().ok()?;
+        let patch = it.next().unwrap_or("0").parse().ok()?;
+        if it.next().is_some() {
+            return None;
+        }
+        Some((maj, min, patch))
+    }
+    match (parse(a), parse(b)) {
+        (Some(pa), Some(pb)) => pa < pb,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +204,29 @@ mod tests {
         };
         assert_eq!(app.display_name, "My App");
         assert!(app.uninstall_supported);
+    }
+
+    #[test]
+    fn semver_lt_compares_numerically_not_lexicographically() {
+        // The critical anti-lexicographic case: 0.9.0 < 0.10.0.
+        assert!(super::semver_lt("0.9.0", "0.10.0"));
+        assert!(!super::semver_lt("0.10.0", "0.9.0"));
+    }
+
+    #[test]
+    fn semver_lt_equal_and_major_bump() {
+        assert!(!super::semver_lt("0.1.0", "0.1.0"));
+        assert!(super::semver_lt("0.1.0", "1.0.0"));
+        assert!(super::semver_lt("0.0.9", "0.1.0"));
+    }
+
+    #[test]
+    fn semver_lt_rejects_bad_input_safely() {
+        // Malformed -> false (never disables install on bad data).
+        assert!(!super::semver_lt("x", "0.1.0"));
+        assert!(!super::semver_lt("0.1.0", "garbage"));
+        // Pre-release / 4th segment -> rejected -> false.
+        assert!(!super::semver_lt("0.1.0-rc1", "0.1.0"));
+        assert!(!super::semver_lt("0.1.0.0", "0.1.0"));
     }
 }

@@ -2,7 +2,17 @@ import { useEffect } from "react";
 import { useStore } from "@nanostores/react";
 import { AppTile } from "../components/app-tile";
 import { PendingUpdateBanner } from "../components/pending-update-banner";
-import { $networkStatus, $hermesHome, loadAppsList } from "../store";
+import {
+  $networkStatus,
+  $hermesHome,
+  $route,
+  loadAppsList,
+  launchApp,
+  applyPendingUpdate,
+  repairApp,
+  openAppSettings,
+  startInstall,
+} from "../store";
 import type { LaunchableApp } from "../lib/launcher-mode";
 
 interface HomeProps {
@@ -19,6 +29,34 @@ export function Home({ apps, onSelect, onInstallAllPending }: HomeProps) {
     void loadAppsList();
   }, []);
 
+  // Dispatch tile primary-button + ⋯ menu actions. Actions that need a
+  // confirmation dialog or a richer surface (uninstall, view details) fall
+  // through to AppDetail via onSelect.
+  function handleTileAction(id: string, action: string) {
+    switch (action) {
+      case "launch":
+        void launchApp(id);
+        break;
+      case "update":
+        void applyPendingUpdate(id);
+        break;
+      case "install":
+        void startInstall();
+        break;
+      case "repair":
+        void repairApp(id);
+        break;
+      case "settings":
+        void openAppSettings(id);
+        break;
+      case "uninstall":
+      case "details":
+      default:
+        onSelect(id);
+        break;
+    }
+  }
+
   const pendingApps = apps.filter((a) => a.pending?.status === "ready");
   const sorted = [...apps].sort((a, b) => Number(b.descriptor.default) - Number(a.descriptor.default));
 
@@ -29,6 +67,9 @@ export function Home({ apps, onSelect, onInstallAllPending }: HomeProps) {
         <span className="network-status" title={`Latency: ${networkStatus.latencyMs ?? "?"}ms`}>
           {networkStatus.hasInternet ? "Online" : "Offline"}
         </span>
+        <button className="settings-link" onClick={() => $route.set("settings")}>
+          Settings
+        </button>
       </header>
 
       {pendingApps.length > 0 && (
@@ -52,7 +93,10 @@ export function Home({ apps, onSelect, onInstallAllPending }: HomeProps) {
               data-testid="app-tile"
               onClick={() => onSelect(app.descriptor.id)}
             >
-              <AppTile app={app} onAction={() => {}} />
+              <AppTile
+                app={app}
+                onAction={(action) => handleTileAction(app.descriptor.id, action)}
+              />
             </div>
           ))}
         </section>

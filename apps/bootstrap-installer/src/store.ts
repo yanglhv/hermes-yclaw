@@ -71,11 +71,12 @@ export interface PendingUpdate {
 }
 
 export interface InstalledApp {
-  app_id: string
-  version: string
   install_root: string
-  last_updated: string
-  pending_update?: PendingUpdate
+  installed_commit: string
+  installed_ref_type: string
+  installed_ref_name: string
+  installed_at: string
+  installed_via: string
 }
 
 export interface LauncherConfig {
@@ -98,6 +99,7 @@ export interface AppDescriptor {
   app_settings_url: string | null
   min_launcher_version: string
   icon?: string
+  version: string
 }
 
 export interface LaunchableApp {
@@ -372,8 +374,17 @@ export async function launchApp(id: string): Promise<void> {
   await invoke('launch_app', { id })
 }
 
-export async function uninstallApp(id: string, scope: 'user' | 'machine'): Promise<void> {
+export async function uninstallApp(id: string, scope: 'light' | 'full'): Promise<void> {
   await invoke('uninstall_app', { id, scope })
+  // Refresh so the Home tile reflects reality, then route to the install
+  // entry point when nothing remains (empty install => welcome screen).
+  await loadAppsList()
+  if (Object.keys($apps.get()).length === 0) {
+    $currentAppId.set(null)
+    $route.set('welcome')
+  } else {
+    $route.set('home')
+  }
 }
 
 export async function repairApp(id: string): Promise<void> {
@@ -386,14 +397,9 @@ export async function repairApp(id: string): Promise<void> {
 export async function checkForUpdates(): Promise<void> {
   $updateCheckStatus.set('checking')
   try {
-    const updated = await invoke<Record<string, PendingUpdate>>('check_for_updates')
-    const state = $launcherState.get()
-    if (state) {
-      $launcherState.set({
-        ...state,
-        pending_updates: { ...state.pending_updates, ...updated }
-      })
-    }
+    await invoke<string[]>('check_for_updates')
+    // The command writes pending_updates into launcher state; reload to reflect it.
+    await loadLauncherState()
     $updateCheckStatus.set('done')
   } catch {
     $updateCheckStatus.set('error')
@@ -407,7 +413,7 @@ export async function preDownloadUpdate(id: string): Promise<void> {
 export async function applyPendingUpdate(id: string): Promise<void> {
   $currentAppId.set(id)
   $route.set('progress')
-  await invoke('apply_pending_update', { appId: id })
+  await invoke('apply_pending_update', { id })
   await loadAppsList()
 }
 
