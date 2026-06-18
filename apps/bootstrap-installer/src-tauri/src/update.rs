@@ -962,9 +962,16 @@ mod tests {
             probes.iter().any(|p| p == &venv_hermes(root)),
             "venv shim remains part of the update lock probe"
         );
+        // Case-insensitive suffix: macOS HFS+/APFS default to case-insensitive
+        // paths but the real on-disk segments are mixed case ("Resources"),
+        // and `Path::ends_with` is case-sensitive. Lowercase both sides.
         assert!(
-            probes.iter().any(|p| p.ends_with(Path::new("resources/app.asar"))),
-            "packaged app.asar must be probed so repair/re-clone waits for the old desktop to exit"
+            probes.iter().any(|p| {
+                let s = p.to_string_lossy().to_ascii_lowercase();
+                s.ends_with("resources/app.asar")
+            }),
+            "packaged app.asar must be probed so repair/re-clone waits for the old desktop to exit; got probes = {:?}",
+            probes
         );
     }
 

@@ -42,7 +42,35 @@ pub fn spawn(app: &AppDescriptor, installed: &InstalledApp) -> Result<(), String
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        Command::new(&path).spawn().map_err(|e| format!("spawn failed: {e}"))?;
+        // Detach the child from our process group so it survives the
+        // installer exit. macOS uses `/usr/bin/open` (detached tree) and
+        // Windows uses `DETACHED_PROCESS`; on Linux a plain `spawn()` would
+        // leave the child in our session, where SIGHUP on installer exit
+        // can take it down. `setsid` puts the child in a new session AND
+        // new process group, which is the portable, libc-free equivalent.
+        // Falls back to a plain spawn if `setsid` is missing (busybox
+        // minimal images, sandboxed CI) — better to launch with a possible
+        // SIGHUP than to refuse to launch.
+        let mut cmd = Command::new("setsid");
+        cmd.arg(&path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        match cmd.spawn() {
+            Ok(_) => {}
+            Err(setsid_err) => {
+                tracing::warn!(
+                    err = %setsid_err,
+                    "setsid unavailable; falling back to plain spawn (SIGHUP risk on installer exit)"
+                );
+                Command::new(&path)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .map_err(|e| format!("spawn failed: {e}"))?;
+            }
+        }
     }
     Ok(())
 }

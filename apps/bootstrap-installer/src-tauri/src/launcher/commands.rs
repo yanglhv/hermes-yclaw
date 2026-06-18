@@ -421,7 +421,7 @@ fn read_checkout_commit(install_root: &std::path::Path) -> String {
 
 /// Unix-seconds timestamp, matching the convention used by
 /// `launcher::state::now_iso` so all launcher timestamps share one format.
-fn now_unix_iso() -> String {
+pub(crate) fn now_unix_iso() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -504,15 +504,24 @@ pub fn uninstall_app(
     scope: String,
     state: State<'_, LauncherStateHandle>,
 ) -> Result<(), String> {
-    let mut s = state.0.lock().unwrap();
+    // Clone the state out, drop the guard, then run the heavy fs work
+    // without holding the lock. Other commands (launch_app, list_available_apps,
+    // save_launcher_state, …) stay responsive during a multi-second rm -rf of
+    // apps/desktop/release/ or a full HERMES_HOME wipe. The in-memory state
+    // is re-synced at the end with a brief lock to commit the result.
+    let mut s = state.0.lock().unwrap().clone();
     let app = AppDescriptor::literal_hermes();
-    match scope.as_str() {
+    let result = match scope.as_str() {
         "light" => crate::launcher::uninstall::light_uninstall(&app, &id, &mut s),
         "full" => crate::launcher::uninstall::full_uninstall(&app, &id, &mut s),
         other => Err(format!(
             "invalid uninstall scope: {other} (expected 'light' or 'full')"
         )),
+    };
+    if result.is_ok() {
+        *state.0.lock().unwrap() = s;
     }
+    result
 }
 
 /// Repair re-runs the install flow for an app. Uses a cached pending-update

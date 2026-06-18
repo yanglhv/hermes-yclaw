@@ -63,7 +63,7 @@ impl AppDescriptor {
         Self {
             schema_version: 1,
             id: "hermes".into(),
-            display_name: "Hermes Agent".into(),
+            display_name: "YClaw Agent".into(),
             category: "agent".into(),
             default: true,
             script_path: "scripts/install.ps1".into(),
@@ -85,7 +85,7 @@ impl AppDescriptor {
             },
             catalog_url: Url::parse("https://api.github.com/repos/NousResearch/hermes-agent").unwrap(),
             icon_url: Url::parse("https://api.github.com/repos/NousResearch/hermes-agent/contents/icon.png").unwrap(),
-            description: "The Hermes Agent desktop application".into(),
+            description: "The YClaw Agent desktop application".into(),
             version: "1.0.0".into(),
             binaries: vec![
                 "apps/desktop/release/win-unpacked/Hermes.exe".into(),

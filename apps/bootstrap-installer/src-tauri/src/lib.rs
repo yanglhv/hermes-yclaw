@@ -145,10 +145,28 @@ pub fn run() {
             // CLI dispatch: non-UI paths that short-circuit before window creation
             match kind {
                 launcher::silent::LaunchKind::FirstInstall => {
-                    tracing::info!("CLI dispatch: FirstInstall → run_silent_default");
+                    tracing::info!(
+                        "CLI dispatch: FirstInstall → fall through to UI (no installed apps to update)"
+                    );
                 }
                 launcher::silent::LaunchKind::Silent => {
-                    tracing::info!("CLI dispatch: Silent → run_silent_default");
+                    tracing::info!(
+                        "CLI dispatch: Silent → run_silent_default (network probe + background update check)"
+                    );
+                    let descriptor = crate::app::AppDescriptor::literal_hermes();
+                    // block_on: setup hook is sync; the helper internally
+                    // uses tokio::task::spawn_blocking for the network probe
+                    // and fetch_head_sha is async, so we drive the future here.
+                    // Failures are logged + swallowed so a flaky network
+                    // doesn't block launch — the user still gets their app.
+                    if let Err(e) = tauri::async_runtime::block_on(
+                        launcher::silent::run_silent_default(&descriptor),
+                    ) {
+                        tracing::warn!(
+                            err = %e,
+                            "silent default: background work failed; continuing with launch"
+                        );
+                    }
                 }
                 launcher::silent::LaunchKind::Launch => {
                     tracing::info!(?launch_target, "CLI dispatch: Launch");

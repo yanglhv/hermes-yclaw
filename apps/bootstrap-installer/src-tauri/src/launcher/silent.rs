@@ -171,43 +171,83 @@ async fn run_inner(app: &crate::app::AppDescriptor) -> Result<InstallOutcome, St
     .map_err(|e| e.to_string())?;
 
     match probe_result {
-        Ok(network_result) if network_result.has_internet => {
-            let catalog_url = app.catalog_url.clone();
-            let catalog_apps = crate::launcher::catalog::list_available_apps(&catalog_url)
-                .await
-                .unwrap_or_default();
-
-            let mut state = crate::launcher::state::load_launcher_state()
-                .map_err(|e| e.to_string())?;
-
-            for catalog_app in &catalog_apps {
-                if state.installed.contains_key(&catalog_app.id) {
-                    state.pending_updates.insert(
-                        catalog_app.id.clone(),
-                        crate::app::PendingUpdate {
-                            latest_commit: "pending".into(),
-                            latest_ref_name: app.default_repo_ref.r#ref.clone(),
-                            status: crate::app::PendingStatus::Avail,
-                            downloaded_script: None,
-                            downloaded_at: None,
-                            last_error: None,
-                            last_error_at: None,
-                        },
-                    );
-                }
-            }
-            state.last_update_check_at = Some("2026-06-16T00:00:00Z".into());
-
-            crate::launcher::state::save_launcher_state(&state)
-                .map_err(|e| e.to_string())?;
+        Ok(r) if r.has_internet => {}
+        Ok(_) => {
+            tracing::info!("silent default: offline; skipping update check");
+            return Ok(InstallOutcome::Installed);
         }
-        Ok(_) => {}
         Err(e) => {
-            tracing::warn!(err = %e, "network probe failed");
+            tracing::warn!(err = %e, "silent default: network probe failed; skipping update check");
+            return Ok(InstallOutcome::Installed);
         }
     }
 
+    // We have internet. Fetch the real HEAD SHA from the descriptor's repo
+    // and compare against each installed app's commit. Mark `pending_updates`
+    // for any app whose installed_commit != head_sha.
+    let repo = repo_ref_from_descriptor(app);
+    let head_sha = match super::update::update::fetch_head_sha(
+        "https://api.github.com",
+        &repo,
+    )
+    .await
+    {
+        Ok(sha) => sha,
+        Err(e) => {
+            tracing::warn!(
+                err = %e,
+                "silent default: fetch_head_sha failed; skipping background update check"
+            );
+            return Ok(InstallOutcome::Installed);
+        }
+    };
+
+    let mut state = crate::launcher::state::load_launcher_state()
+        .map_err(|e| e.to_string())?;
+
+    for (id, inst) in &state.installed {
+        if inst.installed_commit == head_sha {
+            continue;
+        }
+        let entry = state
+            .pending_updates
+            .entry(id.clone())
+            .or_insert_with(|| crate::app::PendingUpdate {
+                latest_commit: head_sha.clone(),
+                latest_ref_name: repo.ref_name.clone(),
+                status: crate::app::PendingStatus::Avail,
+                downloaded_script: None,
+                downloaded_at: None,
+                last_error: None,
+                last_error_at: None,
+            });
+        // Never downgrade an already-Ready/Downloading pre-download.
+        if entry.status != crate::app::PendingStatus::Ready
+            && entry.status != crate::app::PendingStatus::Downloading
+        {
+            entry.status = crate::app::PendingStatus::Avail;
+            entry.latest_commit = head_sha.clone();
+            entry.latest_ref_name = repo.ref_name.clone();
+        }
+    }
+    state.last_update_check_at = Some(crate::launcher::commands::now_unix_iso());
+
+    crate::launcher::state::save_launcher_state(&state)
+        .map_err(|e| e.to_string())?;
+
     Ok(InstallOutcome::Installed)
+}
+
+/// Project an `AppDescriptor::default_repo_ref` into the `install_script::RepoRef`
+/// shape `update::fetch_head_sha` expects. Centralized so the silent flow and
+/// `commands::check_for_updates` can't drift apart.
+fn repo_ref_from_descriptor(app: &crate::app::AppDescriptor) -> crate::install_script::RepoRef {
+    let repo = &app.default_repo_ref.repo;
+    crate::install_script::RepoRef {
+        owner: repo.split('/').next().unwrap_or("").into(),
+        name: repo.split('/').nth(1).unwrap_or("").into(),
+        ref_name: app.default_repo_ref.r#ref.clone(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
