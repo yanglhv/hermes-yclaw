@@ -1,17 +1,19 @@
 [package]
 name = "hermes-bootstrap"
 version = "0.1.0"
-description = "Hermes Setup — signed installer that drives scripts/install.ps1"
+description = "YClaw Setup — signed installer that drives scripts/install.ps1"
 authors = ["Nous Research <info@nousresearch.com>"]
 edition = "2021"
 rust-version = "1.77"
 
 # Rename the output binary so the distributed artifact is literally
-# `Hermes-Setup.exe` on disk — not `hermes-bootstrap.exe`. Grandma sees
-# what we hand her, period. Tauri honors [[bin]] over [package].name
-# for the produced executable name.
+# `YClaw-Setup` (and `YClaw-Setup.exe` on Windows) on disk — not
+# `hermes-bootstrap`. The macOS dock tooltip reads the bare binary
+# name in `tauri dev`, so this controls what shows under the icon.
+# Production `tauri build` then wraps it in a .app bundle whose
+# CFBundleDisplayName comes from `tauri.conf.json` productName.
 [[bin]]
-name = "Hermes-Setup"
+name = "YClaw-Setup"
 path = "src/main.rs"
 
 # The library target name MUST match the `withGlobalTauri` binding name that

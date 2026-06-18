@@ -100,7 +100,7 @@ export function Backdrop() {
             alt=""
             className="w-auto min-w-dvw object-cover"
             fetchPriority="low"
-            src={assetPath('ds-assets/filler-bg0.jpg')}
+            src={assetPath('ds-assets/filler-bg0.png')}
             style={{
               height: `${statue.scale}dvh`,
               objectPosition: statue.objectPosition,

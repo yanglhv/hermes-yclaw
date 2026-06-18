@@ -115,7 +115,7 @@ const config: Config = {
     navbar: {
       title: 'Hermes Agent',
       logo: {
-        alt: 'Hermes Agent',
+        alt: 'YClaw Agent',
         src: 'img/logo.png',
       },
       items: [
