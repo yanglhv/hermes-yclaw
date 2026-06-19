@@ -138,3 +138,5 @@ RELEASE_v*.md
 apps/desktop/demo/
 .claude/
 .openflow/
+.codegraph/
+.comet/
